@@ -2,7 +2,7 @@
 # MAP AND MODEL                 #
 #################################
 
-from carla_code.draw_reference import read_data
+from utils import read_data
 import pdb
 import math
 import random
@@ -16,21 +16,22 @@ try:
 except ImportError as e:
 	raise ModuleNotFoundError('CARLA scenarios require the "carla" Python package') from e
 
-from carla_code.object_dummy import Object_Dummy
+from object_dummy import Object_Dummy
 import scenic.simulators.carla.utils.utils as utils
 import scenic.simulators.carla.blueprints as blueprints
 
-param map = localPath('/home/brianw/Documents/PTZCameraRecognition/CARLA_0.9.10/CarlaUE4/Content/Carla/Maps/OpenDrive/Town10HD.xodr')
+param map = localPath('/home/nesl/Projects/complex_event/DistributedCE/CARLA_0.9.10/CarlaUE4/Content/Carla/Maps/OpenDrive/Town10HD.xodr')
 param carla_map = 'Town10HD'
 model scenic.simulators.carla.model
 
 
 
-fps = 10
+fps = 10 #Simulation fps
 
 
-global_state = 0
-obj_dumm = None
+global_state = 0 #To coordinate mutiple behaviors
+obj_dumm = None #For boxes
+actors_bb = [] #List with all objects (cars,pedestrians,boxes,etc) to be annotated with bounding boxes
 
 #################################
 # AGENT BEHAVIORS               #
@@ -520,12 +521,194 @@ behavior Terrorist(destination):
 # SCENARIO SPECIFICATION        #
 #################################
 
-#for i in network.lanes:
-#    print(i.id)
+def create_multitude(num_pedestrians,destination_locations,walkerModels,actors_bb):
 
 
+    divisor = num_pedestrians / len(destination_locations)
+    destination_idx = 0
+    divisor_mult = divisor
+
+
+    for i in range(num_pedestrians):
+        if i >= divisor_mult:
+            destination_idx +=1
+            divisor_mult = divisor*(destination_idx+1)
+        
+        ped = Pedestrian in sidewalk,
+            with behavior WalkAround(destination_locations[destination_idx]),
+            with blueprint random.choice(walkerModels)
+
+            
+        actors_bb.append(ped)
+        
+
+def activate_cameras(output_dir,cameras):
+
+    points_data = read_data("locations.txt")
+    camera_descriptions = [x for x in points_data if "tc" in x[-1] and int(x[-1][2:]) in cameras]
+
+    for c in camera_descriptions:
+
+        depth_camera = depthCamera at c[0] @ -c[1],
+            with elevation c[2],
+            with pitch c[3],
+            with yaw c[4],
+            with roll 0
+
+        rgbCamera at depth_camera,
+            with elevation c[2],
+            with pitch c[3],
+            with yaw c[4],
+            with roll 0,
+            with depth depth_camera, 
+            with camera_id int(c[-1][-1]),
+            with behavior CameraBehavior(output_dir)
+
+
+
+def run_scenario(num_scenario=0,cameras_on=False, num_extra_pedestrians=0):
+    global actors_bb
+    
+    scenarios = [first_scenario,second_scenario,third_scenario,fourth_scenario]
+    
+    destination_locations,walkerModels = scenarios[num_scenario](actors_bb)
+    
+    create_multitude(num_extra_pedestrians,destination_locations,walkerModels,actors_bb)
+    
+    if cameras_on:
+        activate_cameras(output_dir="camera_img/", cameras=[1,2])
+
+
+#In this scenario, a pedestrian leaves a package and then leaves the scene. A second pedestrian comes afterwards and retrieves the package
+def first_scenario(actors_bb):
+
+    destination_locations = [Range(-94.278351,-60.667870) @ Range(29.682917,51.475655),Range(66.135605,93.087204) @ Range(-5.828710,14.528165),Range(-11.539524,20.287785) @ Range(74.251755,108.597641),Range(-138.710266,-122.311989) @ Range(60.340248,85.676659)]
+
+    walkerModels = blueprints.walkerModels
+
+
+
+    bluep = walkerModels[0] #random.choice(walkerModels)
+        
+    walkerModels.remove(bluep)
+
+    ego = Pedestrian at 67.793434 @ -3.075324,
+        with behavior LeavingPackagesBehaviorSingle(Range(-10,1) @ Range(-5,-5.5)), 
+        with blueprint random.choice(walkerModels)
+        
+    ped2 = Pedestrian at 70.793434 @ -3.075324,
+        with behavior WaitAndGo(-31.996809 @ -3.644337),
+        with blueprint random.choice(walkerModels)
+
+
+    actors_bb = [ego, ped2]
+
+    return destination_locations,walkerModels
+    
+#Package gets exchanged between two pedestrians at a certain point
+def second_scenario(actors_bb):
 
     
+    destination_locations = [Range(-94.278351,-60.667870) @ Range(29.682917,51.475655),Range(66.135605,93.087204) @ Range(-5.828710,14.528165),Range(-11.539524,20.287785) @ Range(74.251755,108.597641),Range(-138.710266,-122.311989) @ Range(60.340248,85.676659)]
+
+    walkerModels = blueprints.walkerModels
+    box_destination = Uniform(*destination_locations)
+
+    bluep = random.choice(walkerModels)
+    two_ped = Pedestrian  in sidewalk, #at -94.900848 @ 24.582340,
+        with behavior StealingPackagesBehaviorDoubleA(box_destination),
+        with blueprint bluep
+        
+    walkerModels.remove(bluep)
+    bluep = random.choice(walkerModels)
+    ego = Pedestrian in sidewalk, #at -59.610615 @ 23.937918,
+        with behavior StealingPackagesBehaviorDoubleB(box_destination),
+        with blueprint bluep
+
+
+    walkerModels.remove(bluep)
+
+    destination = -75.037537 @ 49.348728
+
+
+    actors_bb = [ego,two_ped]
+    
+    return destination_locations,walkerModels
+
+
+#Terrorist attack
+def third_scenario(actors_bb):
+    
+    destination_locations = [Range(-94.278351,-60.667870) @ Range(29.682917,51.475655),Range(66.135605,93.087204) @ Range(-5.828710,14.528165),Range(-11.539524,20.287785) @ Range(74.251755,108.597641),Range(-138.710266,-122.311989) @ Range(60.340248,85.676659)]
+
+    walkerModels = blueprints.walkerModels
+    box_destination = Uniform(*destination_locations)
+
+    bluep = random.choice(walkerModels)
+    ego = Pedestrian in sidewalk,
+        with behavior Terrorist(box_destination),
+        with blueprint bluep
+
+    actors_bb = [ego]
+    walkerModels.remove(bluep)
+    for i in range(100):
+        ped = Pedestrian in sidewalk,
+            with behavior BombScare(Range(-94.278351,-60.667870) @ Range(29.682917,51.475655),box_destination),
+            with blueprint random.choice(walkerModels)
+
+        #if ped.carlaActor is not None:
+        actors_bb.append(ped)
+        
+        
+    return destination_locations,walkerModels
+
+
+
+#Steal package and escape with car
+def fourth_scenario(actors_bb):
+    
+    
+    destination_locations = [Range(-94.278351,-60.667870) @ Range(29.682917,51.475655),Range(66.135605,93.087204) @ Range(-5.828710,14.528165),Range(-11.539524,20.287785) @ Range(74.251755,108.597641),Range(-138.710266,-122.311989) @ Range(60.340248,85.676659)]
+    box_destination = Uniform(*destination_locations)
+
+    
+
+    walkerModels = blueprints.walkerModels
+
+
+
+    #Second scenario
+    car = Car with behavior CarFoBehavior(box_destination)
+        #with behavior FollowTrajectoryBehavior(trajectory=[network.lanes[0],network.lanes[38]])
+
+
+    box = Box at box_destination #Range(-10,1) @ Range(-5,-5.5) #19.195606 @ -2.534948 #39.821236 @ 11.909901 #box_destination
+
+    box_destination2 = Uniform(*destination_locations)
+
+    box2 = Box at box_destination2
+
+    bluep = walkerModels[0] #random.choice(walkerModels)
+
+
+    ego = Pedestrian in sidewalk, #at -94.900848 @ 24.582340,
+        with behavior StealingPackagesBehaviorSingleCar(box_destination,car),
+        with blueprint bluep
+
+        
+    walkerModels.remove(bluep)
+
+    ped2 = Pedestrian at 67.793434 @ -3.075324,
+        with behavior RandomActionPackage(box_destination2),
+        with blueprint random.choice(walkerModels)
+
+
+    actors_bb = [ego,box,car,ped2,box2]
+    
+    
+     
+    return destination_locations,walkerModels
+
 
 """
 select_lane = ""
@@ -533,106 +716,7 @@ for lane in network.lanes:
     if lane.id == "road5_lane1":
         select_lane = lane
 """
-
-destination_locations = [Range(-94.278351,-60.667870) @ Range(29.682917,51.475655),Range(66.135605,93.087204) @ Range(-5.828710,14.528165),Range(-11.539524,20.287785) @ Range(74.251755,108.597641),Range(-138.710266,-122.311989) @ Range(60.340248,85.676659)]
-box_destination = Uniform(*destination_locations)
-
-num_pedestrians = 100
-
-walkerModels = blueprints.walkerModels
-
-
-
-#Second scenario
-#car = Car with behavior CarFoBehavior(box_destination)
-    #with behavior FollowTrajectoryBehavior(trajectory=[network.lanes[0],network.lanes[38]])
-
-
-box = Box at box_destination #Range(-10,1) @ Range(-5,-5.5) #19.195606 @ -2.534948 #39.821236 @ 11.909901 #box_destination
-
-box_destination2 = Uniform(*destination_locations)
-
-box2 = Box at box_destination2
-
-#Box at Uniform(*destination_locations)
-
-bluep = walkerModels[0] #random.choice(walkerModels)
-
-"""
-ego = Pedestrian in sidewalk, #at -94.900848 @ 24.582340,
-    with behavior StealingPackagesBehaviorSingleCar(box_destination,car),
-    with blueprint bluep
-"""
-    
-walkerModels.remove(bluep)
-
-ego = Pedestrian at 67.793434 @ -3.075324,
-    with behavior LeavingPackagesBehaviorSingle(Range(-10,1) @ Range(-5,-5.5)), #RandomActionPackage(box_destination2),
-    with blueprint random.choice(walkerModels)
-    
-ped2 = Pedestrian at 70.793434 @ -3.075324,
-    with behavior WaitAndGo(-31.996809 @ -3.644337),
-    with blueprint random.choice(walkerModels)
-
-#actors_bb = [ego,box,car,ped2,box2]
-actors_bb = [ego, ped2]
-
-
-divisor = num_pedestrians / len(destination_locations)
-destination_idx = 0
-divisor_mult = divisor
-
-"""
-for i in range(num_pedestrians):
-    if i >= divisor_mult:
-        destination_idx +=1
-        divisor_mult = divisor*(destination_idx+1)
-    
-    ped = Pedestrian in sidewalk,
-        with behavior WalkAround(destination_locations[destination_idx]),
-        with blueprint random.choice(walkerModels)
-
-        
-    actors_bb.append(ped)
-
-"""
-"""
-##First scenario 
-
-    
-bluep = random.choice(walkerModels)
-two_ped = Pedestrian  in sidewalk, #at -94.900848 @ 24.582340,
-    with behavior StealingPackagesBehaviorDoubleA(box_destination),
-    with blueprint bluep
-    
-walkerModels.remove(bluep)
-bluep = random.choice(walkerModels)
-ego = Pedestrian in sidewalk, #at -59.610615 @ 23.937918,
-    with behavior StealingPackagesBehaviorDoubleB(box_destination),
-    with blueprint bluep
-
-
-walkerModels.remove(bluep)
-#box = Box at Range(-94.278351,-60.667870) @ Range(29.682917,51.475655)
-
-destination = -75.037537 @ 49.348728
-
-
-actors_bb = [ego,two_ped]
-"""
-
-"""
-for i in range(100):
-    ped = Pedestrian in sidewalk,
-    with behavior WalkAround(Range(-94.278351,-60.667870) @ Range(29.682917,51.475655)),
-    with blueprint random.choice(walkerModels)
-
-    #if ped.carlaActor is not None:
-    actors_bb.append(ped)
-"""        
-	       
-
-
+  
 
 
 """
@@ -645,73 +729,13 @@ for i in range(100):
     actors_bb.append(ped)
 """
 
-"""
-##Fourth scenario
+
+
+
+run_scenario(num_scenario=3,num_extra_pedestrians=100)
 
 
 
 
-
-for i in range(100):
-    if i < 50:
-        ped = Pedestrian in sidewalk,
-            with behavior WalkAround(Range(-94.278351,-60.667870) @ Range(29.682917,51.475655)),
-            with blueprint random.choice(walkerModels)
-    else:
-        ped = Pedestrian in sidewalk,
-            with behavior WalkAround(Range(66.135605,93.087204) @ Range(-5.828710,14.528165)),
-            with blueprint random.choice(walkerModels)
-
-    #if ped.carlaActor is not None:
-    actors_bb.append(ped)
-"""
-
-"""
-##Third scenario
-
-bluep = random.choice(walkerModels)
-ego = Pedestrian in sidewalk,
-    with behavior Terrorist(box_destination),
-    with blueprint bluep
-
-actors_bb = [ego]
-walkerModels.remove(bluep)
-for i in range(100):
-    ped = Pedestrian in sidewalk,
-        with behavior BombScare(Range(-94.278351,-60.667870) @ Range(29.682917,51.475655),box_destination),
-        with blueprint random.choice(walkerModels)
-
-    #if ped.carlaActor is not None:
-    actors_bb.append(ped)
-
-"""
-
-"""
-box = Box at -9.937593 @ -79.820206,
-    with elevation 1
-"""
-
-"""
-points_data = read_data("carla_code/points.txt")
-camera_descriptions = [x for x in points_data if "tc" in x[-1]]
-
-for c in camera_descriptions:
-
-    depth_camera = depthCamera at c[0] @ -c[1],
-        with elevation c[2],
-        with pitch c[3],
-        with yaw c[4],
-        with roll 0
-
-    rgbCamera at depth_camera,
-        with elevation c[2],
-        with pitch c[3],
-        with yaw c[4],
-        with roll 0,
-        with depth depth_camera, 
-        with camera_id int(c[-1][-1]),
-        with behavior CameraBehavior("camera_img/")
-
-
-"""		
+		
 
