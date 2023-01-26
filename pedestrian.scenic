@@ -37,6 +37,8 @@ actors_bb = [] #List with all objects (cars,pedestrians,boxes,etc) to be annotat
 # AGENT BEHAVIORS               #
 #################################
 
+
+#Make the pedestrian arrive to destination and then walk around it
 behavior WalkAround(destination):
     global fps
     
@@ -65,7 +67,7 @@ behavior WalkAround(destination):
 
                 wait
             
-
+#Go and take a box
 behavior StealingPackagesBehaviorSingle():
     global fps
     state = 0
@@ -116,6 +118,7 @@ behavior WaitAndGo(destination):
             
         wait
 
+#Go to a location, leave a box and then leave
 behavior LeavingPackagesBehaviorSingle(box_destination):
     global fps, global_state
     state = 0
@@ -155,6 +158,8 @@ behavior LeavingPackagesBehaviorSingle(box_destination):
         else:
             wait   
             
+
+#Go and take package but with an additional animation when taking the package that makes it more realistic. Note here the use of both SetWalkingSpeedAction as well as SetWalkingSpeedAction2. They correspond to two different interfaces for pedestrian control. The SetWalkingSpeedAction2 let us set the speed at which a pedestrian arrives into a location if it was going in a straight line without any trajectory control, as opposed to the other action.
 behavior StealingPackagesBehaviorSupplement(destination):
     global fps
     state = 0
@@ -201,7 +206,9 @@ behavior StealingPackagesBehaviorSupplement(destination):
             
         else:
             wait
-            
+
+
+#Randomly decide if aimlessly walk or steal a package            
 behavior RandomActionPackage(destination):
     decision = Uniform(0,1)
     print(decision)
@@ -213,7 +220,8 @@ behavior RandomActionPackage(destination):
     else:
         do StealingPackagesBehaviorSupplement(destination)
         
-            
+
+#Steal a package and then leave in a car
 behavior StealingPackagesBehaviorSingleCar(destination,car):
     global fps,global_state
     state = 0
@@ -276,6 +284,7 @@ behavior StealingPackagesBehaviorSingleCar(destination,car):
         else:
             wait
 
+#Leave a package in a certain location and wait for someone else to take it
 behavior StealingPackagesBehaviorDoubleA(destination):
     
     global obj_dumm,global_state
@@ -307,6 +316,7 @@ behavior StealingPackagesBehaviorDoubleA(destination):
         else:
             wait
     
+#Go to a location to retrieve a package, someone is waiting there
 behavior StealingPackagesBehaviorDoubleB(destination):
     
     global obj_dumm,global_state
@@ -340,11 +350,12 @@ behavior StealingPackagesBehaviorDoubleB(destination):
         else:
             wait
         
-
+#For bounding boxes and to store the images
 behavior CameraBehavior(path):
     while True:
         take GetBoundingBox(actors_bb,path)
 		
+#Not used
 behavior CarFollowingBehavior():
 
     try:
@@ -352,6 +363,7 @@ behavior CarFollowingBehavior():
     interrupt when self.distanceToClosest(Pedestrian) < 20:
         take SetBrakeAction(1)
         
+#Control over a car to get into a destination and then leave
 behavior CarFoBehavior(destination):
     
     global fps, global_state
@@ -377,14 +389,14 @@ behavior CarFoBehavior(destination):
             control = agent._local_planner.run_step()
             self.carlaActor.apply_control(control)
             
-            if agent.done():
+            if agent.done(): #Arrived at location, now stop
                 state += 1
                 past_time = simulation().currentTime
                 agent._target_speed = 0
                 self.carlaActor.apply_control(agent.run_step())
                 print("done")
                 global_state += 0.5
-        elif global_state == 2 and state == 2 and simulation().currentTime - past_time > Uniform(10,20)*fps:
+        elif global_state == 2 and state == 2 and simulation().currentTime - past_time > Uniform(10,20)*fps: #After pedestrian gets in the car, drive over a random route and then terminate
             past_time = simulation().currentTime
             print("followLane")
             try:
@@ -395,6 +407,7 @@ behavior CarFoBehavior(destination):
         
         wait
     
+#Not used
 behavior CarFollowBehavior():
     #take GetPathVehicle(self,box)
     
@@ -473,6 +486,7 @@ behavior CarFollowBehavior():
     #    wait
     
     
+#Pedestrian walking around until it starts running from a certain location
 behavior BombScare(destination,box_destination):
     global global_state
     
@@ -486,6 +500,7 @@ behavior BombScare(destination,box_destination):
         while True:
             wait
         
+#Pedestrian that leaves a package in a crowded area
 behavior Terrorist(destination):
     
     global obj_dumm,global_state
@@ -566,7 +581,7 @@ def activate_cameras(output_dir,cameras):
 
 
 
-def run_scenario(num_scenario=0,cameras_on=False, num_extra_pedestrians=0):
+def run_scenario(num_scenario=0,cameras_on=[], num_extra_pedestrians=0, output_dir="."):
     global actors_bb
     
     scenarios = [first_scenario,second_scenario,third_scenario,fourth_scenario]
@@ -576,7 +591,7 @@ def run_scenario(num_scenario=0,cameras_on=False, num_extra_pedestrians=0):
     create_multitude(num_extra_pedestrians,destination_locations,walkerModels,actors_bb)
     
     if cameras_on:
-        activate_cameras(output_dir="camera_img/", cameras=[1,2])
+        activate_cameras(output_dir=output_dir, cameras=cameras_on)
 
 
 #In this scenario, a pedestrian leaves a package and then leaves the scene. A second pedestrian comes afterwards and retrieves the package
@@ -732,7 +747,7 @@ for i in range(100):
 
 
 
-run_scenario(num_scenario=3,num_extra_pedestrians=100)
+run_scenario(num_scenario=3,num_extra_pedestrians=100, output_dir="camera_img/")
 
 
 
