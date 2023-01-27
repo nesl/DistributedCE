@@ -1,3 +1,6 @@
-[submodule "Scenic"]
-	path = Scenic
-	url = https://github.com/nesl/Scenic
+[submodule "simulator/Scenic"]
+	path = simulator/Scenic
+	url = https://github.com/nesl/Scenic.git
+[submodule "detection/yolov5"]
+	path = detection/yolov5
+	url = https://github.com/nesl/yolov5.git
