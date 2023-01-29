@@ -8,6 +8,7 @@ from yolov5.detect_simple import Yolo_Exec
 import glob
 import os
 import socket
+import argparse
 
 def setup_connections_and_handling(address, port):
 
@@ -89,8 +90,18 @@ tripwire1 = 1300
 tripwire2 = 1750
 functions = ['cross_tripwire']
 
-address = '10.0.0.2'
-port = 58000
+
+
+parser = argparse.ArgumentParser(description='Forwarder.')
+parser.add_argument('--address', type=str, help='Address to bind')
+parser.add_argument('--port', type=int, help='Port to bind')
+
+
+args = parser.parse_args()
+
+
+address = args.address
+port = args.port
 
 function_metadata['cross_tripwire'] = [tripwire1,tripwire2]
 '''

@@ -13,7 +13,7 @@ Distributed Complex Event Detection Architecture
 8. Clone [Mininet](https://github.com/mininet/mininet) and move the **mininet/mininet** subfolder to the current directory.
 9. Run `sudo python3 test_mininet.py`
 10. When the interactive console appears, run `source mininet_commands`
-11. In each respective open xterm, run the respective *h?.sh* script, starting with *h1.sh*. For *h1.sh* and *h2.sh* wait until the output says *Setting up Server...* to continue executing the other *h?.sh* scripts.
+11. In each respective open xterm, run the respective *h?.sh* script, starting with *h1_1.sh* and *h1_2.sh*. For *h1_2.sh*, *h2.sh* and *h4.sh* wait until the output says *Setting up Server...* to continue executing the other *h?.sh* scripts.
 12. You can also try running the *h?.sh* script without mininet in different terminal tabs but keep in mind you need to change the addresses.
 
 Note: There are two *requirements.txt* files for two different virtual environments, one in the main directory for *venv* and the other in *detection* directory for *yolo*.

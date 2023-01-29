@@ -2,7 +2,7 @@ import socket
 import numpy as np
 import cv2
 import pdb
-
+import argparse
 
 def recvall(sock, n):
     # Helper function to recv n bytes or return None if EOF is hit
@@ -15,12 +15,19 @@ def recvall(sock, n):
     return data
 
 
+parser = argparse.ArgumentParser(description='Forwarder.')
+parser.add_argument('--address_source', type=str, help='Source address of camera')
+parser.add_argument('--address_sink', type=str, help='Send images to this address')
+parser.add_argument('--port_source', type=int, help='Source port of camera')
+parser.add_argument('--port_sink', type=int, help='Send images to this port')
+
+args = parser.parse_args()
 
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client_socket.connect(('10.0.0.1', 55001))
+client_socket.connect((args.address_source, args.port_source))
 
 client_socket2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client_socket2.connect(('10.0.0.2', 58000))
+client_socket2.connect((args.address_sink, args.port_sink))
 imgsz = 800*600*4
 while True:
 

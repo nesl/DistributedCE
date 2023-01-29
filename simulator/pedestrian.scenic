@@ -358,12 +358,22 @@ behavior CameraBehavior(path):
         take GetBoundingBox(actors_bb,path)
 
 #For streaming images to server
-behavior CameraStreamingBehavior(camera_id,server_connection,current_server_listening_thread,stop_listening_event):
+behavior CameraStreamingBehavior(camera_id,server_socket,stop_listening_event):
 
     frame_index = 0
     while True:
-        take SendImages(frame_index,camera_id,server_connection,current_server_listening_thread,stop_listening_event)	
-        frame_index += 1
+
+        if not self.connected:  
+            
+            server_connection,current_server_listening_thread = setupListeningServer(camera_id,server_socket,stop_listening_event)
+            if server_connection:
+                self.connected = True
+    
+        if self.connected:
+            take SendImages(frame_index,camera_id,server_connection,current_server_listening_thread,stop_listening_event)	
+            frame_index += 1
+        else:
+            wait
         
         
 #Not used
@@ -748,15 +758,13 @@ def setup_connections_and_handling(camera_id):
 		
 		server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+		server_socket.setblocking(0)
 		server_socket.bind(("10.0.0.1", 55000+camera_id))
 		server_socket.listen()
 
-		server_connection, addr = server_socket.accept()
-
-		# server_socket.connect(("127.0.0.1", 55000))
-		print("Server set up...")
 		
-		return server_connection
+		
+		return server_socket
 
 
 def listenHandler(camera_id, server_connection, event):
@@ -860,18 +868,26 @@ def listenHandler(camera_id, server_connection, event):
 				# return False
 				# Handle logic for listening for commands
 
-def setupListeningServer(camera_id, server_connection,stop_listening_event):
+def setupListeningServer(camera_id, server_socket,stop_listening_event):
 		print("Setting up listening handler")
+		
+		try:
+    		server_connection, addr = server_socket.accept()
+		except:
+		    return 0,0
+
+		# server_socket.connect(("127.0.0.1", 55000))
+		print("Server set up...")
 		
 		current_listening_thread = Thread(target = listenHandler, args = (camera_id, server_connection, stop_listening_event))
 			
 		current_listening_thread.start()
 		
-		return current_listening_thread
+		return server_connection,current_listening_thread
 
 def test_scenario():
 
-    cameras = [1]
+    cameras = [1,2]
     points_data = read_data("locations.txt")
     camera_descriptions = [x for x in points_data if "tc" in x[-1] and int(x[-1][2:]) in cameras]
 
@@ -882,8 +898,8 @@ def test_scenario():
     
     for c in camera_descriptions:
         camera_id = int(c[-1][-1])
-        server_connection = setup_connections_and_handling(camera_id)
-        current_server_listening_thread = setupListeningServer(camera_id,server_connection,stop_listening_event)
+        server_socket = setup_connections_and_handling(camera_id)
+        
         
         #Review this camera_id
         rgbCamera at c[0] @ -c[1],
@@ -892,7 +908,8 @@ def test_scenario():
             with yaw c[4],
             with roll 0,
             with camera_id camera_id,
-            with behavior CameraStreamingBehavior(camera_id,server_connection,current_server_listening_thread,stop_listening_event)
+            with connected False,
+            with behavior CameraStreamingBehavior(camera_id,server_socket,stop_listening_event)
 
     destination_locations,walkerModels = first_scenario()
     

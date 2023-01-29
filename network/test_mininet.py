@@ -20,6 +20,8 @@ def emptyNet():
     h1 = net.addHost( 'h1', ip='10.0.0.1' )
     h2 = net.addHost( 'h2', ip='10.0.0.2' )
     h3 = net.addHost( 'h3', ip='10.0.0.3' )
+    h4 = net.addHost( 'h4', ip='10.0.0.4' )
+    h5 = net.addHost( 'h5', ip='10.0.0.5' )
 
 
     info( '*** Adding switch\n' )
@@ -29,6 +31,8 @@ def emptyNet():
     net.addLink( h1, s1 )
     net.addLink( h2, s1 )
     net.addLink( h3, s1 )
+    net.addLink( h4, s1 )
+    net.addLink( h5, s1 )
 
 
     info( '*** Starting network\n')
