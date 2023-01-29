@@ -72,9 +72,9 @@ files = sorted(glob.glob(os.path.join(source, '*.*')))
 
 
 #Metadata with camera information
-f = open('../../Delivery-2022-12-12/metadata.json')
+#f = open('../../Delivery-2022-12-12/metadata.json')
 
-metadata = json.load(f)
+#metadata = json.load(f)
 
 tracks = {}
 state = {}
