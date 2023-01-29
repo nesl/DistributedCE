@@ -9,6 +9,7 @@ import glob
 import os
 import socket
 import argparse
+import pybboxes as pbx
 
 def setup_connections_and_handling(address, port):
 
@@ -169,15 +170,20 @@ while True:
     #imageidx = int.from_bytes(server_connection.recv(2),"big")
     image_np = np.frombuffer(image, dtype=np.dtype("uint8"))#.reshape(2560,1440)
     image = cv2.cvtColor( image_np.reshape(600,800,4), cv2.COLOR_BGRA2BGR )
-    cv2.imshow('image',image)
-    cv2.waitKey(1)
+    
     #pdb.set_trace()
     print("received ", f_idx)
     #files[f_idx]
     res_lines = yolo.run(image)
+    
+    
     #pdb.set_trace()
     #res = open('exp5/labels/out-%04d.txt' %(f_idx+1))
     #res_lines = res.readlines()
+ 
+    if not res_lines:
+        cv2.imshow('image',image)
+        cv2.waitKey(1)
  
     #We read the detection file and iterate over the bounding box lines
     for line in res_lines:
@@ -186,7 +192,10 @@ while True:
         coordinates_line = line.split()
         
         
-        
+        box_voc = pbx.convert_bbox((float(coordinates_line[1]),float(coordinates_line[2]),float(coordinates_line[3]),float(coordinates_line[4])), from_type="yolo", to_type="voc", image_size=(pixel_width,pixel_height))
+        cv2.rectangle(image, (box_voc[0], box_voc[1]), (box_voc[2], box_voc[3]), (0, 0, 255), 1)
+        cv2.imshow('image',image)
+        cv2.waitKey(1)
         
         x1 = float(coordinates_line[1])*pixel_width
         y1 = float(coordinates_line[2])*pixel_height
