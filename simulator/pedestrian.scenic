@@ -22,7 +22,7 @@ from object_dummy import Object_Dummy
 import scenic.simulators.carla.utils.utils as utils
 import scenic.simulators.carla.blueprints as blueprints
 
-param map = localPath('/home/nesl/Projects/complex_event/DistributedCE/simulator/CARLA_0.9.10/CarlaUE4/Content/Carla/Maps/OpenDrive/Town10HD.xodr')
+param map = localPath('./CARLA_0.9.10/CarlaUE4/Content/Carla/Maps/OpenDrive/Town10HD.xodr')
 param carla_map = 'Town10HD'
 model scenic.simulators.carla.model
 
@@ -547,8 +547,8 @@ behavior Terrorist(destination):
 # SCENARIO SPECIFICATION        #
 #################################
 
-def create_multitude(num_pedestrians,destination_locations,walkerModels,actors_bb):
-
+def create_multitude(num_pedestrians,destination_locations,walkerModels):
+    global actors_bb
 
     divisor = num_pedestrians / len(destination_locations)
     destination_idx = 0
@@ -593,22 +593,23 @@ def activate_cameras(output_dir,cameras):
 
 
 def run_scenario(num_scenario=0,cameras_on=[], num_extra_pedestrians=0, output_dir="."):
-    global actors_bb
+    
     
     scenarios = [first_scenario,second_scenario,third_scenario,fourth_scenario, test_scenario]
     
-    destination_locations,walkerModels = scenarios[num_scenario](actors_bb)
+    destination_locations,walkerModels = scenarios[num_scenario]()
     
     if num_extra_pedestrians > 0:
-	    create_multitude(num_extra_pedestrians,destination_locations,walkerModels,actors_bb)
+	    create_multitude(num_extra_pedestrians,destination_locations,walkerModels)
     
     if cameras_on:
         activate_cameras(output_dir=output_dir, cameras=cameras_on)
 
 
 #In this scenario, a pedestrian leaves a package and then leaves the scene. A second pedestrian comes afterwards and retrieves the package
-def first_scenario(actors_bb):
-
+def first_scenario():
+    global actors_bb
+    
     destination_locations = [Range(-94.278351,-60.667870) @ Range(29.682917,51.475655),Range(66.135605,93.087204) @ Range(-5.828710,14.528165),Range(-11.539524,20.287785) @ Range(74.251755,108.597641),Range(-138.710266,-122.311989) @ Range(60.340248,85.676659)]
 
     walkerModels = blueprints.walkerModels
@@ -633,8 +634,8 @@ def first_scenario(actors_bb):
     return destination_locations,walkerModels
     
 #Package gets exchanged between two pedestrians at a certain point
-def second_scenario(actors_bb):
-
+def second_scenario():
+    global actors_bb
     
     destination_locations = [Range(-94.278351,-60.667870) @ Range(29.682917,51.475655),Range(66.135605,93.087204) @ Range(-5.828710,14.528165),Range(-11.539524,20.287785) @ Range(74.251755,108.597641),Range(-138.710266,-122.311989) @ Range(60.340248,85.676659)]
 
@@ -664,7 +665,8 @@ def second_scenario(actors_bb):
 
 
 #Terrorist attack
-def third_scenario(actors_bb):
+def third_scenario():
+    global actors_bb
     
     destination_locations = [Range(-94.278351,-60.667870) @ Range(29.682917,51.475655),Range(66.135605,93.087204) @ Range(-5.828710,14.528165),Range(-11.539524,20.287785) @ Range(74.251755,108.597641),Range(-138.710266,-122.311989) @ Range(60.340248,85.676659)]
 
@@ -692,8 +694,8 @@ def third_scenario(actors_bb):
 
 
 #Steal package and escape with car
-def fourth_scenario(actors_bb):
-    
+def fourth_scenario():
+    global actors_bb
     
     destination_locations = [Range(-94.278351,-60.667870) @ Range(29.682917,51.475655),Range(66.135605,93.087204) @ Range(-5.828710,14.528165),Range(-11.539524,20.287785) @ Range(74.251755,108.597641),Range(-138.710266,-122.311989) @ Range(60.340248,85.676659)]
     box_destination = Uniform(*destination_locations)
@@ -745,7 +747,8 @@ def setup_connections_and_handling(camera_id):
 		server_connections = []
 		
 		server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		server_socket.bind(("127.0.0.1", 55000+camera_id))
+		server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+		server_socket.bind(("10.0.0.1", 55000+camera_id))
 		server_socket.listen()
 
 		server_connection, addr = server_socket.accept()
@@ -866,7 +869,7 @@ def setupListeningServer(camera_id, server_connection,stop_listening_event):
 		
 		return current_listening_thread
 
-def test_scenario(actors_bb):
+def test_scenario():
 
     cameras = [1]
     points_data = read_data("locations.txt")
@@ -875,7 +878,7 @@ def test_scenario(actors_bb):
     stop_listening_event = threading.Event()
 
 
-    ego = Pedestrian in sidewalk
+    #ego = Pedestrian in sidewalk
     
     for c in camera_descriptions:
         camera_id = int(c[-1][-1])
@@ -891,7 +894,9 @@ def test_scenario(actors_bb):
             with camera_id camera_id,
             with behavior CameraStreamingBehavior(camera_id,server_connection,current_server_listening_thread,stop_listening_event)
 
-    return 0,0
+    destination_locations,walkerModels = first_scenario()
+    
+    return destination_locations,walkerModels
 
 """
 select_lane = ""

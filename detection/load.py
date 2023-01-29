@@ -7,6 +7,24 @@ import cv2
 from yolov5.detect_simple import Yolo_Exec
 import glob
 import os
+import socket
+
+def setup_connections_and_handling(address, port):
+
+	# Insert our networking stuff
+	print("Setting up Server...")
+	server_connections = []
+	
+	server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	server_socket.bind((address, port))
+	server_socket.listen()
+
+	server_connection, addr = server_socket.accept()
+
+	# server_socket.connect(("127.0.0.1", 55000))
+	print("Server set up...")
+	
+	return server_connection
 
 
 def state_init(state, functions):
@@ -36,9 +54,18 @@ def cross_tripwire(tracks,state, tripwires):
         
     return results
     
+def recvall(sock, n):
+    # Helper function to recv n bytes or return None if EOF is hit
+    data = bytearray()
+    while len(data) < n:
+        packet = sock.recv(n - len(data))
+        if not packet:
+            return None
+        data.extend(packet)
+    return data    
 
 
-yolo = Yolo_Exec(weights='../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
+yolo = Yolo_Exec(weights='./yolov5s.pt', imgsz=[800],conf_thres=0.5) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
 
 source = '../../Delivery-2022-12-12/video1/'
 files = sorted(glob.glob(os.path.join(source, '*.*')))
@@ -62,8 +89,11 @@ tripwire1 = 1300
 tripwire2 = 1750
 functions = ['cross_tripwire']
 
-function_metadata['cross_tripwire'] = [tripwire1,tripwire2]
+address = '10.0.0.2'
+port = 58000
 
+function_metadata['cross_tripwire'] = [tripwire1,tripwire2]
+'''
 for f_idx in range(len(metadata)):
     #pdb.set_trace()
     
@@ -109,9 +139,31 @@ for f_idx in range(len(metadata)):
     inv_matrix[3,2] = inv_matrix_meta["m23"]
     inv_matrix[3,3] = inv_matrix_meta["m33"]
     """
+'''
+
+
+server_connection = setup_connections_and_handling(address,port)
+
+imgsz = 800*600*4
+
+pixel_width = 800
+pixel_height = 600
+
+while True:    
     
-    
-    res_lines = yolo.run(files[f_idx])
+    f_idx = int.from_bytes(recvall(server_connection, 2),'big')
+
+    image =recvall(server_connection, imgsz)
+
+    #imageidx = int.from_bytes(server_connection.recv(2),"big")
+    image_np = np.frombuffer(image, dtype=np.dtype("uint8"))#.reshape(2560,1440)
+    image = cv2.cvtColor( image_np.reshape(600,800,4), cv2.COLOR_BGRA2BGR )
+    cv2.imshow('image',image)
+    cv2.waitKey(1)
+    #pdb.set_trace()
+    print("received ", f_idx)
+    #files[f_idx]
+    res_lines = yolo.run(image)
     #pdb.set_trace()
     #res = open('exp5/labels/out-%04d.txt' %(f_idx+1))
     #res_lines = res.readlines()
@@ -180,12 +232,14 @@ for f_idx in range(len(metadata)):
                     #pdb.set_trace()
                     #Range of values where tank should be x = [2697,2938], z = [-2127,-1698]
                     #Not sure about this
+                    '''
                     screen_coordinates = np.array([float(coordinates_line[1])*pixel_width,float(coordinates_line[2])*pixel_height,near_clip_plane,1]) #According to https://gamedevbeginner.com/how-to-convert-the-mouse-position-to-world-space-in-unity-2d-3d/ and https://docs.unity3d.com/ScriptReference/Camera.ScreenToWorldPoint.html the z value should be the near_clip_plane
 
                     #screen_coordinates = np.array([float(coordinates_line[2])*pixel_height,float(coordinates_line[1])*pixel_width,near_clip_plane,1])
                     world_coordinates = np.matmul(inv_matrix,screen_coordinates) #np.matmul(inv_matrix,screen_coordinates) #np.matmul(screen_coordinates,inv_matrix)
                     normalized_world_coordinates = world_coordinates/world_coordinates[-1]
                     print(normalized_world_coordinates)
+                    '''
             #image_res = cv2.imread('exp5/out-%04d.jpg' %(f_idx+1))
 
             #cv2.imshow("result", image_res)

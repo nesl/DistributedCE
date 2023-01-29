@@ -3,12 +3,19 @@ Distributed Complex Event Detection Architecture
 
 ## Setup
 
-1. Install CARLA 0.9.10 with the Additional Maps. Extract the CARLA files and put them under a new directory with the name of **CARLA_0.9.10**.
-2. Install [Poetry](https://python-poetry.org/) into your system
-3. Install Scenic by getting into the Scenic folder and using `poetry install -E dev`
-4. Clone [CARLA-2DBBox](https://github.com/MukhlasAdib/CARLA-2DBBox) into the main directory and name it bbox_annotation.
-5. Run the command `CARLA_0.9.10/CarlaUE4.sh` in one terminal tab.
-6. Run the command `scenic pedestrian.scenic --simulate` in another tab.
+1. Run `git clone --recurse-submodules https://github.com/nesl/DistributedCE.git`
+2. Change directory: `cd simulator/`
+3. Install CARLA 0.9.10 with the Additional Maps. Extract the CARLA files and put them under a new directory with the name of **CARLA_0.9.10**.
+4. Install [Poetry](https://python-poetry.org/) into your system
+5. Install Scenic by getting into the Scenic folder and using `poetry install -E dev`
+6. Clone [CARLA-2DBBox](https://github.com/MukhlasAdib/CARLA-2DBBox) and name it bbox_annotation.
+7. Change directory: `cd ../network`
+8. Clone [Mininet](https://github.com/mininet/mininet) and move the **mininet/mininet** subfolder to the current directory.
+9. Run `sudo python3 test_mininet.py`
+10. When the interactive console appears, run `source mininet_commands`
+11. In each respective open xterm, run the respective *h?.sh* script, starting with *h1.sh*. For *h1.sh* and *h2.sh* wait until the output says *Setting up Server...* to continue executing the other *h?.sh* scripts.
+12. You can also try running the *h?.sh* script without mininet in different terminal tabs but keep in mind you need to change the addresses.
+
 
 ## Changes to Scenic
 
@@ -48,7 +55,7 @@ obj_dumm = Object_Dummy(Uniform(*blueprints.boxModels),box_destination,0,0)
 simulation().createObjectInSimulator(obj_dumm)
 ```
 
-To destroy the object:
+&nbsp;To destroy the object:
 
 `obj_dumm.carlaActor.destroy()`
 
