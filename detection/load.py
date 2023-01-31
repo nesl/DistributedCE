@@ -10,23 +10,17 @@ import os
 import socket
 import argparse
 import pybboxes as pbx
+from time import sleep
 
-def setup_connections_and_handling(address, port):
+def setup_socket():
 
-	# Insert our networking stuff
-	print("Setting up Server...")
-	server_connections = []
+
 	
-	server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	server_socket.bind((address, port))
-	server_socket.listen()
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket.settimeout(5)
 
-	server_connection, addr = server_socket.accept()
-
-	# server_socket.connect(("127.0.0.1", 55000))
-	print("Server set up...")
 	
-	return server_connection
+    return client_socket
 
 
 def state_init(state, functions):
@@ -62,12 +56,12 @@ def recvall(sock, n):
     while len(data) < n:
         packet = sock.recv(n - len(data))
         if not packet:
-            return None
+            raise RuntimeError("socket connection broken")
         data.extend(packet)
     return data    
 
 
-yolo = Yolo_Exec(weights='./yolov5s.pt', imgsz=[800],conf_thres=0.5) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
+yolo = Yolo_Exec(weights='./yolov5s.pt', imgsz=[800],conf_thres=0.5, device='1') #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
 
 source = '../../Delivery-2022-12-12/video1/'
 files = sorted(glob.glob(os.path.join(source, '*.*')))
@@ -94,8 +88,8 @@ functions = ['cross_tripwire']
 
 
 parser = argparse.ArgumentParser(description='Forwarder.')
-parser.add_argument('--address', type=str, help='Address to bind')
-parser.add_argument('--port', type=int, help='Port to bind')
+parser.add_argument('--address', type=str, help='Address to connect to')
+parser.add_argument('--port', type=int, help='Port to connect to')
 
 
 args = parser.parse_args()
@@ -154,7 +148,8 @@ for f_idx in range(len(metadata)):
 '''
 
 
-server_connection = setup_connections_and_handling(address,port)
+client_socket = setup_socket()
+client_socket.connect((address, port))
 
 imgsz = 800*600*4
 
@@ -163,18 +158,56 @@ pixel_height = 600
 
 while True:    
     
-    f_idx = int.from_bytes(recvall(server_connection, 2),'big')
+    try:
+        f_idx = int.from_bytes(recvall(client_socket, 2),'big')
 
-    image =recvall(server_connection, imgsz)
+        image =recvall(client_socket, imgsz)
+    except:
+        print('Timeout')
+        #server_connection, addr = server_socket.accept()
+        client_socket = setup_socket()
+        connected = False
+        while not connected:  
+            # attempt to reconnect, otherwise sleep for 2 seconds  
+            try:  
+                client_socket.connect((address, port))
+                connected = True  
+                print( "re-connection successful" )  
+            except socket.error:  
+                sleep( 1 ) 
+        #server_connection.settimeout(5)
+        continue	
 
     #imageidx = int.from_bytes(server_connection.recv(2),"big")
     image_np = np.frombuffer(image, dtype=np.dtype("uint8"))#.reshape(2560,1440)
     image = cv2.cvtColor( image_np.reshape(600,800,4), cv2.COLOR_BGRA2BGR )
     
+    
+    # Add the traffic camera label to it
+    # font
+    font = cv2.FONT_HERSHEY_SIMPLEX
+  
+    # org
+    org = (50, 50)
+  
+    # fontScale
+    fontScale = 1
+   
+    # COLOR in BGR
+    color = (0, 255, 0)
+  
+    # Line thickness of 2 px
+    thickness = 2
+    
+    
     #pdb.set_trace()
     print("received ", f_idx)
     #files[f_idx]
     res_lines = yolo.run(image)
+    
+    # Using cv2.putText() method
+    image = cv2.putText(image, 'Traffic Camera ID: ' + str(f_idx), org, font, 
+	           fontScale, color, thickness, cv2.LINE_AA)
     
     
     #pdb.set_trace()
