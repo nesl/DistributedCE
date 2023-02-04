@@ -12,11 +12,11 @@ import threading
 
 import sys
 try:
-	sys.path.append('CARLA_0.9.10/PythonAPI/carla/dist/carla-0.9.10-py3.7-linux-x86_64.egg')
-	sys.path.append('CARLA_0.9.10/PythonAPI/carla/')
-	import carla as _carla
+    sys.path.append('CARLA_0.9.10/PythonAPI/carla/dist/carla-0.9.10-py3.7-linux-x86_64.egg')
+    sys.path.append('CARLA_0.9.10/PythonAPI/carla/')
+    import carla as _carla
 except ImportError as e:
-	raise ModuleNotFoundError('CARLA scenarios require the "carla" Python package') from e
+    raise ModuleNotFoundError('CARLA scenarios require the "carla" Python package') from e
 
 from object_dummy import Object_Dummy
 import scenic.simulators.carla.utils.utils as utils
@@ -372,8 +372,8 @@ behavior CameraStreamingBehavior(camera_id,server_socket,stop_listening_event):
     
         if self.connected:
             # MADE A CHANGE: This will always send the camera ID rather than the frame_index
-            #take SendImages(frame_index,camera_id,server_connection,current_server_listening_thread,stop_listening_event)
-            take SendImages(camera_id,camera_id,server_connection,current_server_listening_thread,stop_listening_event)	
+            take SendImages(frame_index,camera_id,server_connection,current_server_listening_thread,stop_listening_event)
+            #take SendImages(camera_id,camera_id,server_connection,current_server_listening_thread,stop_listening_event)    
             frame_index += 1
         else:
             wait
@@ -407,7 +407,7 @@ behavior CarFoBehavior(destination):
     state = 0
     past_time = 0
     while True:            
-        if state == 0:	       
+        if state == 0:           
             state += 1
         elif state == 1:
             control = agent._local_planner.run_step()
@@ -589,7 +589,7 @@ def activate_cameras(output_dir,cameras):
 
     for c in camera_descriptions:
 
-        depth_camera = depthCamera at c[0] @ -c[1],
+        depth_camera = depthCamera at c[0] @ -c[1], 
             with elevation c[2],
             with pitch c[3],
             with yaw c[4],
@@ -614,7 +614,7 @@ def run_scenario(num_scenario=0,cameras_on=[], num_extra_pedestrians=0, output_d
     destination_locations,walkerModels = scenarios[num_scenario]()
     
     if num_extra_pedestrians > 0:
-	    create_multitude(num_extra_pedestrians,destination_locations,walkerModels)
+        create_multitude(num_extra_pedestrians,destination_locations,walkerModels)
     
     if cameras_on:
         activate_cameras(output_dir=output_dir, cameras=cameras_on)
@@ -756,140 +756,140 @@ def fourth_scenario():
 
 def setup_connections_and_handling(camera_id):
 
-		# Insert our networking stuff
-		print("Setting up Server...", camera_id)
-		server_connections = []
-		
-		server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-		server_socket.setblocking(0)
-		server_socket.bind(("10.0.0.1", 55000+camera_id))
-		server_socket.listen()
+        # Insert our networking stuff
+        print("Setting up Server...", camera_id)
+        server_connections = []
+        
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_socket.setblocking(0)
+        server_socket.bind(("10.0.0.1", 55000+camera_id))
+        server_socket.listen()
 
-		
-		
-		return server_socket
+        
+        
+        return server_socket
 
 
 def listenHandler(camera_id, server_connection, event):
 
-		size = 4096
-		global ZOOM_PARAMETERS
-		while True:
+        size = 4096
+        global ZOOM_PARAMETERS
+        while True:
 
-			if event.is_set():
-				break
+            if event.is_set():
+                break
 
-			try:
-				data = str(server_connection.recv(size).decode("utf8"))
+            try:
+                data = str(server_connection.recv(size).decode("utf8"))
 
-				# Other preprocessing stuff
-				# Remove all newlines and tabs
-				data = data.replace("\n", "")
-				data = data.replace("\t", "")
-				data = data.replace(" ", "")
-				# re.sub('\\s+', ' ', data)
+                # Other preprocessing stuff
+                # Remove all newlines and tabs
+                data = data.replace("\n", "")
+                data = data.replace("\t", "")
+                data = data.replace(" ", "")
+                # re.sub('\\s+', ' ', data)
 
-				if data and "offset" in data:
+                if data and "offset" in data:
 
-					# print(repr(data))
+                    # print(repr(data))
 
-					if data[0] != "{":
-						data_start_index = data.index("{")
-						data = data[data_start_index:]
-					if data[-1] != "}":
-						data_end_index = data[::-1].index("}")
-						data = data[:data_end_index+1]
-					data = data.lstrip('\x00') # Remove null bytes
+                    if data[0] != "{":
+                        data_start_index = data.index("{")
+                        data = data[data_start_index:]
+                    if data[-1] != "}":
+                        data_end_index = data[::-1].index("}")
+                        data = data[:data_end_index+1]
+                    data = data.lstrip('\x00') # Remove null bytes
 
-					# print(repr(data))
+                    # print(repr(data))
 
-					received_data = json.loads(data)
+                    received_data = json.loads(data)
 
-					# print("hi2 " + str(data))
-					offset_data = received_data["offset(left/top)"]
+                    # print("hi2 " + str(data))
+                    offset_data = received_data["offset(left/top)"]
 
-					current_frame_id = received_data["frame"]
+                    current_frame_id = received_data["frame"]
 
-					# Add our received timestamp
-					# received_frame_latencies[str(current_frame_id)].append(time.time())
-					# print(time.time() - received_frame_latencies[str(current_frame_id)][0])
+                    # Add our received timestamp
+                    # received_frame_latencies[str(current_frame_id)].append(time.time())
+                    # print(time.time() - received_frame_latencies[str(current_frame_id)][0])
 
-					# print(offset_data)
+                    # print(offset_data)
 
-					# If we have offset information, we can move the cameras
-					if len(offset_data) > 0:
+                    # If we have offset information, we can move the cameras
+                    if len(offset_data) > 0:
 
-						# Pick the smallest track id
-						print(received_data["others"])
+                        # Pick the smallest track id
+                        print(received_data["others"])
 
-						# HERE we track only the first object that shows up in a list
-						# print("Offset data: " + str(offset_data[0]))
-						left_offset = offset_data[0][0]
-						top_offset = offset_data[0][1]
+                        # HERE we track only the first object that shows up in a list
+                        # print("Offset data: " + str(offset_data[0]))
+                        left_offset = offset_data[0][0]
+                        top_offset = offset_data[0][1]
 
-						# Determine the direction of pitch and yaw
-						yaw_direction = 1 if left_offset > 0.5 else -1 # move along X axis
-						pitch_direction = -1 if top_offset > 0.5 else 1 # move along Y axis
+                        # Determine the direction of pitch and yaw
+                        yaw_direction = 1 if left_offset > 0.5 else -1 # move along X axis
+                        pitch_direction = -1 if top_offset > 0.5 else 1 # move along Y axis
 
-						change_magnitude = 1.5
-						yaw_update = yaw_direction * change_magnitude
-						pitch_update = pitch_direction * change_magnitude
+                        change_magnitude = 1.5
+                        yaw_update = yaw_direction * change_magnitude
+                        pitch_update = pitch_direction * change_magnitude
 
-						# Also, check how big the object is in the video
-						relative_area = received_data["areas"][0]
-						zoom_in = False
-						if relative_area < 0.25: # Less than 10th of the frame
-							zoom_in = True
+                        # Also, check how big the object is in the video
+                        relative_area = received_data["areas"][0]
+                        zoom_in = False
+                        if relative_area < 0.25: # Less than 10th of the frame
+                            zoom_in = True
 
-						# Now we alter the cameras and spectator
-						current_camera = camera_id
-						new_rotation_update = (pitch_update, yaw_update, 0)
+                        # Now we alter the cameras and spectator
+                        current_camera = camera_id
+                        new_rotation_update = (pitch_update, yaw_update, 0)
 
-						# Perform the rotation
-						# new_transform = rotate_actor(current_camera, new_rotation_update, zoom_in)
-						# rotate_actor(spectator, new_rotation_update, zoom_in)
+                        # Perform the rotation
+                        # new_transform = rotate_actor(current_camera, new_rotation_update, zoom_in)
+                        # rotate_actor(spectator, new_rotation_update, zoom_in)
 
-						# Perform zoom in
-						# if zoom_in:
-						#     # Get new attributes
-						#     # blueprint_library = world.get_blueprint_library()
-						#     # rgb_camera_bp_new = blueprint_library.find('sensor.camera.rgb')
-						#     # carla.command.DestroyActor(camera_list[0][0])
-						#     # position_actor(world, rgb_camera_bp_new, [], new_transform)
-						#     # print("Placing new camera!")
-						#     print("ZOOM SET TO TRUE")
-						#     ZOOM_PARAMETERS[0] = True
-						# else:
-						#     ZOOM_PARAMETERS[0] = False
+                        # Perform zoom in
+                        # if zoom_in:
+                        #     # Get new attributes
+                        #     # blueprint_library = world.get_blueprint_library()
+                        #     # rgb_camera_bp_new = blueprint_library.find('sensor.camera.rgb')
+                        #     # carla.command.DestroyActor(camera_list[0][0])
+                        #     # position_actor(world, rgb_camera_bp_new, [], new_transform)
+                        #     # print("Placing new camera!")
+                        #     print("ZOOM SET TO TRUE")
+                        #     ZOOM_PARAMETERS[0] = True
+                        # else:
+                        #     ZOOM_PARAMETERS[0] = False
 
-			except Exception as e:
+            except Exception as e:
                 pass
-				# return False
-				# print("\n*****HERE****\n")
-				#print(e)
-				# asfd
-				# return False
-				# Handle logic for listening for commands
+                # return False
+                # print("\n*****HERE****\n")
+                #print(e)
+                # asfd
+                # return False
+                # Handle logic for listening for commands
 
 def setupListeningServer(camera_id, server_socket,stop_listening_event):
-		#print("Setting up listening handler")
-		
-		try:
-    		server_connection, addr = server_socket.accept()
-		except:
-		    return 0,0
+        #print("Setting up listening handler")
+        
+        try:
+            server_connection, addr = server_socket.accept()
+        except:
+            return 0,0
 
-		# server_socket.connect(("127.0.0.1", 55000))
-		print("Server set up...")
-		server_connection.setblocking(0) #Non blocking socket
-		
-		#current_listening_thread = Thread(target = listenHandler, args = (camera_id, server_connection, stop_listening_event))
-			
-		#current_listening_thread.start()
-		current_listening_thread = []
-		
-		return server_connection,current_listening_thread
+        # server_socket.connect(("127.0.0.1", 55000))
+        print("Server set up...")
+        server_connection.setblocking(0) #Non blocking socket
+        
+        #current_listening_thread = Thread(target = listenHandler, args = (camera_id, server_connection, stop_listening_event))
+            
+        #current_listening_thread.start()
+        current_listening_thread = []
+        
+        return server_connection,current_listening_thread
 
 def test_scenario():
 
@@ -953,5 +953,5 @@ run_scenario(num_scenario=4,num_extra_pedestrians=0, output_dir="camera_img/", c
 
 
 
-		
+        
 

@@ -65,8 +65,15 @@ def emptyNet():
 	info( '*** Adding hosts\n' )
 	
 	simulator_ip_address = '10.0.0.1'
+	central_server_ip_address = '10.0.0.2'
+	broker_1_ip_address = '10.0.0.3'
+	broker_2_ip_address = '10.0.0.4'
 	
 	h1 = net.addHost( 'h1', ip=simulator_ip_address )
+	h2 = net.addHost( 'h2', ip=central_server_ip_address )
+	h3 = net.addHost( 'h3', ip=broker_1_ip_address )
+	h4 = net.addHost( 'h4', ip=broker_2_ip_address )
+
 	#h2 = net.addHost( 'h2', ip='10.0.0.2' )
 	#h3 = net.addHost( 'h3', ip='10.0.0.3' )
 	#h4 = net.addHost( 'h4', ip='10.0.0.4' )
@@ -80,9 +87,13 @@ def emptyNet():
 
 	client_hosts = []
 	client_data = []
-	host_id = 2
+	host_id = 5
 
 	load_port = 55001
+	broker_1_port_consumers = 54001
+	broker_1_port_producers = 54002
+	broker_2_port_consumers = 54003
+	broker_2_port_producers = 54004
 	#load_port = 58001
 	
 	
@@ -95,7 +106,7 @@ def emptyNet():
 		loader_ip_address = "10.0.0." + str(host_id)
 		client_hosts.append( net.addHost(hostname_loader, ip=loader_ip_address ) )
 
-		loader_arguments = [ simulator_ip_address, str(load_port)]
+		loader_arguments = [ simulator_ip_address, str(load_port), broker_1_ip_address, str(broker_1_port_consumers), broker_2_ip_address, str(broker_2_port_producers), str(host_id-4)]
 		print(loader_arguments)
 		#host_id += 1
 
@@ -119,6 +130,9 @@ def emptyNet():
 	# Add network links
 	client_links = []
 	net.addLink(h1, s1)
+	net.addLink(h2, s1)
+	net.addLink(h3, s1)
+	net.addLink(h4, s1)
 	for host in client_hosts:
 		print(host)
 		link = net.addLink(host, s1)
@@ -139,6 +153,10 @@ def emptyNet():
 	time.sleep(5)
 	h1_pid = h1.cmd("xterm -hold -e './h1_2.sh' &")
 	
+	#ZMQ brokers
+	h3_pid = h3.cmd("xterm -hold -e './broker.sh " + str(broker_1_port_consumers) + " " + str(broker_1_port_producers) + "' &")
+	h4_pid = h4.cmd("xterm -hold -e './broker.sh " + str(broker_2_port_consumers) + " " + str(broker_2_port_producers) + "' &")
+	
 
 	# Next, set up all of our loaders, which must perform YOLO
 
@@ -155,6 +173,11 @@ def emptyNet():
 	# Then, load up our forwarders
 	time.sleep(5)
 
+	#Central server
+	h2_pid = h2.cmd("xterm -hold -e './central_server.sh " + broker_1_ip_address + " " + str(broker_1_port_producers) + " " + broker_2_ip_address + " " + str(broker_2_port_consumers) + "' &")
+	
+	#Wait for central server to load
+	time.sleep(5)
 	"""
 	for i in range(1, len(client_hosts), 2):
 		command = "xterm -hold -e './h3.sh " + ' '.join(client_data[i]) + "' &"
@@ -164,13 +187,17 @@ def emptyNet():
 	# h3_pid = h3.cmd("xterm -hold -e './h3.sh' &")
 	# h5_pid = h5.cmd("xterm -hold -e './h5.sh' &")
 
+	print(h1_pid,h2_pid,h3_pid,h4_pid)
 
 	# Add all our pids to be killed upon exit
 	carla_pid = subprocess.check_output("ps aux | grep CarlaUE4-Linux-Shipping", shell=True)
 	pids_to_kill.append(carla_pid.decode().split()[1])
+	
 	pids_to_kill.append(h1_pid.split()[-1])
+
 	#pids_to_kill.append(h3_pid.split()[-1])
 	#pids_to_kill.append(h5_pid.split()[-1])
+
 	#pids_to_kill.append(h2_pid.split()[-1])
 	#pids_to_kill.append(h4_pid.split()[-1])
 

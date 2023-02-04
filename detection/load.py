@@ -12,6 +12,15 @@ import argparse
 import pybboxes as pbx
 from time import sleep
 
+import pickle
+import zmq
+import time
+import sys
+
+sys.path.append('../network')
+from data_format import Message, Data, Location
+
+
 def setup_socket():
 
 
@@ -23,12 +32,44 @@ def setup_socket():
     return client_socket
 
 
-def state_init(state, functions):
+def setup_zmq(ip_from_server,ip_to_server,port_from_server,port_to_server):
+
+    ctx = zmq.Context()
+
+    #server_ip = zmq_address  # "10.0.0.10" #"10.0.0.10" #"192.168.0.133"#"192.168.0.100" #"192.168.0.133" #"127.0.0.1"
+
+    #port_from_server = "5561"
+    #port_to_server = "5560"
+    address_from_server = "tcp://%s:%s" % (ip_from_server, port_from_server)
+    address_to_server = "tcp://%s:%s" % (ip_to_server, port_to_server)
+
+
+    sock_from_server = ctx.socket(zmq.SUB)
+    sock_from_server.connect(address_from_server)
+    print("address_from_server:", address_from_server)
+    sock_to_server = ctx.socket(zmq.PUB)
+    sock_to_server.connect(address_to_server)
+    sock_from_server.setsockopt(zmq.SUBSCRIBE, b'')
+    print("address_to_server: ", address_to_server)
+    
+    return sock_from_server, sock_to_server
+
+
+
+
+def state_init(state, track, functions, arguments):
+    
+    for f in functions:
+        state[track][f] = {'data': [], 'results': np.full((len(arguments[f]),), False)}
+
+    return state
+    
+def state_add(state, functions, arguments):
     
     for s in state.keys():
-        for f in functions:
-            state[s][f] = {'data': [], 'results': False}
-
+        state = state_init(state, s, functions, arguments)
+        
+    return state
 
 #Cross trip_wire function
 def cross_tripwire(tracks,state, tripwires):
@@ -50,6 +91,39 @@ def cross_tripwire(tracks,state, tripwires):
         
     return results
     
+#Watchbox function
+def watchbox(tracks,state, watchboxes):
+    results = []
+    for t_key in tracks.keys():
+
+            #pdb.set_trace()
+            reference_point = [tracks[t_key][0][0]+(tracks[t_key][0][2] - tracks[t_key][0][0])/2, tracks[t_key][0][1] + (tracks[t_key][0][3] - tracks[t_key][0][1])/2]
+            p1 = reference_point[0] - watchboxes[:,0] > 0
+            p2 = reference_point[1] - watchboxes[:,1] > 0
+            p3 = reference_point[0] - watchboxes[:,2] < 0
+            p4 = reference_point[1] - watchboxes[:,3] < 0
+            ptotal = p1 & p2 & p3 & p4
+
+            
+            try:
+                results_tmp = np.logical_xor(ptotal,state[t_key]['watchbox']['results'])
+            except:
+                pdb.set_trace()
+                print("Error")
+            #print(ptotal, state[t_key]['watchbox']['results'], results_tmp, t_key)
+            results_tmp = np.nonzero(results_tmp)[0]
+            state[t_key]['watchbox']['results'] = ptotal
+            
+            if results_tmp.size > 0:
+                #pdb.set_trace()
+                results.append([results_tmp, state[t_key]['watchbox']['results'][results_tmp], t_key])
+                
+                
+            
+        
+        
+    return results,state
+    
 def recvall(sock, n):
     # Helper function to recv n bytes or return None if EOF is hit
     data = bytearray()
@@ -63,8 +137,8 @@ def recvall(sock, n):
 
 yolo = Yolo_Exec(weights='./yolov5s.pt', imgsz=[800],conf_thres=0.5, device='1') #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
 
-source = '../../Delivery-2022-12-12/video1/'
-files = sorted(glob.glob(os.path.join(source, '*.*')))
+#source = '../../Delivery-2022-12-12/video1/'
+#files = sorted(glob.glob(os.path.join(source, '*.*')))
 
 
 #Metadata with camera information
@@ -78,18 +152,23 @@ state = {}
 track_id = 0
 
 function_metadata = {}
-
+functions = []
 
 #Two different tripwires defined as the location with respect to the image width for a given pixel column
-tripwire1 = 1300
-tripwire2 = 1750
-functions = ['cross_tripwire']
+#tripwire1 = 1300
+#tripwire2 = 1750
+#functions = ['cross_tripwire']
 
 
 
-parser = argparse.ArgumentParser(description='Forwarder.')
-parser.add_argument('--address', type=str, help='Address to connect to')
-parser.add_argument('--port', type=int, help='Port to connect to')
+parser = argparse.ArgumentParser(description='Edge Processing Node')
+parser.add_argument('--address', type=str, help='Address to connect to receive images')
+parser.add_argument('--port', type=int, help='Port to connect to receive images')
+parser.add_argument('--address_to_server', type=str, help='Address to connect to send atomic events')
+parser.add_argument('--port_to_server', type=int, help='Port to connect to send atomic events')
+parser.add_argument('--address_from_server', type=str, help='Address to connect to receive topic subscriptions')
+parser.add_argument('--port_from_server', type=int, help='Port to connect to receive topic subscriptions')
+parser.add_argument('--camera_id', type=int, help='Camera id')
 
 
 args = parser.parse_args()
@@ -98,7 +177,7 @@ args = parser.parse_args()
 address = args.address
 port = args.port
 
-function_metadata['cross_tripwire'] = [tripwire1,tripwire2]
+#function_metadata['cross_tripwire'] = [tripwire1,tripwire2]
 '''
 for f_idx in range(len(metadata)):
     #pdb.set_trace()
@@ -151,12 +230,39 @@ for f_idx in range(len(metadata)):
 client_socket = setup_socket()
 client_socket.connect((address, port))
 
+sock_from_server, sock_to_server = setup_zmq(args.address_from_server,args.address_to_server,args.port_from_server,args.port_to_server)
+
 imgsz = 800*600*4
 
 pixel_width = 800
 pixel_height = 600
 
 while True:    
+    
+    try:
+        topic, msg = sock_from_server.recv_multipart(flags=zmq.NOBLOCK)
+        print("Receive message")
+        print(
+            '   Topic: {}, msg:{}'.format(
+                topic.decode('utf-8'), pickle.loads(msg)
+            )
+        )
+
+        message = pickle.loads(msg)
+        print("Message", message)
+        atomic_event = message.topics
+        print("Atomic event", atomic_event)
+        functions.append(atomic_event)
+        print("jere")
+        function_metadata[atomic_event] = np.array(message.arguments)
+        print("here2", message.arguments)
+        state = state_add(state,[atomic_event],function_metadata[atomic_event])
+    except:
+        pass
+            
+        
+    
+    
     
     try:
         f_idx = int.from_bytes(recvall(client_socket, 2),'big')
@@ -201,12 +307,12 @@ while True:
     
     
     #pdb.set_trace()
-    print("received ", f_idx)
+    #print("received ", f_idx)
     #files[f_idx]
     res_lines = yolo.run(image)
     
     # Using cv2.putText() method
-    image = cv2.putText(image, 'Traffic Camera ID: ' + str(f_idx), org, font, 
+    image = cv2.putText(image, 'Traffic Camera ID: ' + str(args.camera_id), org, font, 
 	           fontScale, color, thickness, cv2.LINE_AA)
     
     
@@ -230,21 +336,22 @@ while True:
         cv2.imshow('image',image)
         cv2.waitKey(1)
         
+        box_ff50 = pbx.convert_bbox((float(coordinates_line[1]),float(coordinates_line[2]),float(coordinates_line[3]),float(coordinates_line[4])), from_type="yolo", to_type="coco", image_size=(pixel_width,pixel_height))
         x1 = float(coordinates_line[1])*pixel_width
         y1 = float(coordinates_line[2])*pixel_height
         
         x2 = x1 + float(coordinates_line[3])*pixel_width
         y2 = y1 + float(coordinates_line[4])*pixel_height
 
-        new_box = np.array([x1,y1,x2,y2],dtype=np.float32)
-        
+        new_box = np.array([box_voc[0],box_voc[1],box_voc[2],box_voc[3]],dtype=np.float32)
+        #print(box_voc, new_box)
         
         #We try tracking the objects using IoU
-        if not f_idx or not tracks: #Create track for a new object
+        if not tracks: #Create track for a new object
             tracks[track_id] = (new_box,f_idx)
             state[track_id] = {}
-            state_init(state,functions)
-            
+            state = state_init(state,track_id,functions,function_metadata)
+            print("New track 1", track_id, state[track_id])
             track_id += 1
         else:
             for t_key in tracks.keys():
@@ -253,11 +360,13 @@ while True:
                 if overlap > max_overlap[1]:
                     max_overlap[1] = overlap
                     max_overlap[0] = t_key
-            if max_overlap[1] < 0.2: #If htere is no that much overlap, create new track
+            if max_overlap[1] < 0.01: #If htere is no that much overlap, create new track
                 tracks[track_id] = (new_box,f_idx)
                 state[track_id] = {}
-                state_init(state,functions)
+                state = state_init(state,track_id,functions,function_metadata)
+                print("New track 2", track_id, state[track_id], functions, max_overlap[1], tracks[t_key][0], new_box)
                 track_id += 1
+                
             else:
                 tracks[max_overlap[0]] = (new_box,f_idx)
                 
@@ -267,36 +376,43 @@ while True:
         if f_idx - tracks[t_key][1] > 5:
             to_delete.append(t_key)
 
+
     for t_key in to_delete:
         del tracks[t_key]
+        
         del state[t_key]
         
     #print(tracks)
     
     for f in functions:
         #Apply functions according to query (right now only two tripwires are checked)
-        res = eval(f+"(tracks,state,function_metadata['" + f +"'])")
+        res,state = eval(f+"(tracks,state,function_metadata['" + f +"'])")
 
-    
         if res:
-            for r in res:
-                if f == 'cross_tripwire': #If there is an event (change of state)
-                    print("Tripwires", r[0], "crossed by", r[1], "at", f_idx+1)
-                    #pdb.set_trace()
-                    #Range of values where tank should be x = [2697,2938], z = [-2127,-1698]
-                    #Not sure about this
-                    '''
-                    screen_coordinates = np.array([float(coordinates_line[1])*pixel_width,float(coordinates_line[2])*pixel_height,near_clip_plane,1]) #According to https://gamedevbeginner.com/how-to-convert-the-mouse-position-to-world-space-in-unity-2d-3d/ and https://docs.unity3d.com/ScriptReference/Camera.ScreenToWorldPoint.html the z value should be the near_clip_plane
+            if f == 'watchbox':
+                print("Watchbox entered or not")
+                sock_to_server.send_multipart([f.encode("utf-8"), pickle.dumps(res)])
 
-                    #screen_coordinates = np.array([float(coordinates_line[2])*pixel_height,float(coordinates_line[1])*pixel_width,near_clip_plane,1])
-                    world_coordinates = np.matmul(inv_matrix,screen_coordinates) #np.matmul(inv_matrix,screen_coordinates) #np.matmul(screen_coordinates,inv_matrix)
-                    normalized_world_coordinates = world_coordinates/world_coordinates[-1]
-                    print(normalized_world_coordinates)
-                    '''
-            #image_res = cv2.imread('exp5/out-%04d.jpg' %(f_idx+1))
+                
+                    
+            if f == 'cross_tripwire': #If there is an event (change of state)
+                print("Tripwires", r[0], "crossed by", r[1], "at", f_idx+1)
+                #sock_to_server.send_multipart([topic.encode("utf-8"), pickle.dumps(events_by_topic[topic])])
+                #pdb.set_trace()
+                #Range of values where tank should be x = [2697,2938], z = [-2127,-1698]
+                #Not sure about this
+                '''
+                screen_coordinates = np.array([float(coordinates_line[1])*pixel_width,float(coordinates_line[2])*pixel_height,near_clip_plane,1]) #According to https://gamedevbeginner.com/how-to-convert-the-mouse-position-to-world-space-in-unity-2d-3d/ and https://docs.unity3d.com/ScriptReference/Camera.ScreenToWorldPoint.html the z value should be the near_clip_plane
 
-            #cv2.imshow("result", image_res)
-            #cv2.waitKey(1)
+                #screen_coordinates = np.array([float(coordinates_line[2])*pixel_height,float(coordinates_line[1])*pixel_width,near_clip_plane,1])
+                world_coordinates = np.matmul(inv_matrix,screen_coordinates) #np.matmul(inv_matrix,screen_coordinates) #np.matmul(screen_coordinates,inv_matrix)
+                normalized_world_coordinates = world_coordinates/world_coordinates[-1]
+                print(normalized_world_coordinates)
+                '''
+    #image_res = cv2.imread('exp5/out-%04d.jpg' %(f_idx+1))
+
+    #cv2.imshow("result", image_res)
+    #cv2.waitKey(1)
 
     """
     coordinates_line = line.split()
