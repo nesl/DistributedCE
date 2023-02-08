@@ -7,3 +7,9 @@ detection/yolo
 *.pt
 network/mininet
 network/openflow
+network/test.sh
+simulator/overlays/
+simulator/reference.png
+simulator/draw_reference.py
+network/new_client.py
+network/draw_reference.py

@@ -358,7 +358,7 @@ behavior CameraBehavior(path):
         take GetBoundingBox(actors_bb,path)
 
 #For streaming images to server
-behavior CameraStreamingBehavior(camera_id,server_socket,stop_listening_event):
+behavior CameraStreamingBehavior(camera_id,server_socket,stop_listening_event,path):
 
     frame_index = 0
     while True:
@@ -372,7 +372,7 @@ behavior CameraStreamingBehavior(camera_id,server_socket,stop_listening_event):
     
         if self.connected:
             # MADE A CHANGE: This will always send the camera ID rather than the frame_index
-            take SendImages(frame_index,camera_id,server_connection,current_server_listening_thread,stop_listening_event)
+            take SendImages(frame_index,camera_id,server_connection,current_server_listening_thread,stop_listening_event,path)
             #take SendImages(camera_id,camera_id,server_connection,current_server_listening_thread,stop_listening_event)    
             frame_index += 1
         else:
@@ -633,14 +633,18 @@ def first_scenario():
     bluep = walkerModels[0] #random.choice(walkerModels)
         
     walkerModels.remove(bluep)
+    
+    bluep2 = walkerModels[0]
+    
+    walkerModels.remove(bluep2)
 
     ego = Pedestrian at 67.793434 @ -3.075324,
         with behavior LeavingPackagesBehaviorSingle(Range(-10,1) @ Range(-5,-5.5)), 
-        with blueprint random.choice(walkerModels)
+        with blueprint bluep #random.choice(walkerModels)
         
     ped2 = Pedestrian at 70.793434 @ -3.075324,
         with behavior WaitAndGo(-31.996809 @ -3.644337),
-        with blueprint random.choice(walkerModels)
+        with blueprint bluep2 #random.choice(walkerModels)
 
 
     actors_bb = [ego, ped2]
@@ -902,7 +906,7 @@ def test_scenario():
 
     stop_listening_event = threading.Event()
 
-
+    path = '' #'./camera_image'
     #ego = Pedestrian in sidewalk
     
     for c in camera_descriptions:
@@ -919,7 +923,7 @@ def test_scenario():
             with roll 0,
             with camera_id camera_id,
             with connected False,
-            with behavior CameraStreamingBehavior(camera_id,server_socket,stop_listening_event)
+            with behavior CameraStreamingBehavior(camera_id,server_socket,stop_listening_event,path)
 
 
 

@@ -141,6 +141,8 @@ def setup_thread(query, visitor, tree, query_num):
     sock_to_sensors.connect(address_to_sensors)
     #print(address_to_sensors)
     topics = query.atomic_functions[0]
+    
+
 
     message_num = 0
 
@@ -164,6 +166,7 @@ def setup_thread(query, visitor, tree, query_num):
         print("received", topic.decode('utf-8'))
         msg = pickle.loads(msg)
         print(msg)
+
         #pdb.set_trace()
         #visitor.update_signal(msg[0].time, msg)
         #output = visitor.visit(tree)
@@ -214,7 +217,7 @@ if __name__ == "__main__":
     with open(query_path, "r") as f:
         data = f.read()
 
-    atomic_functions = ['watchbox', [[400, 0, 800, 600]]]#[data]
+    atomic_functions = ['watchbox', [[400, 0, 700, 600, 0]]]#[data]
     #visitor, tree = get_query(data)
     #atomic_functions = get_ordered_atomic_functions(visitor, tree)
     print(atomic_functions)
