@@ -20,7 +20,11 @@ import sys
 sys.path.append('../network')
 from data_format import Message, Data, Location
 
-from motrackers import CentroidTracker
+#from motrackers import CentroidTracker, IOUTracker, CentroidKF_Tracker, SORT
+from trackers.tracker.byte_tracker import BYTETracker
+from trackers.sort_tracker.sort import Sort
+from trackers.motdt_tracker.motdt_tracker import OnlineTracker
+from trackers.deepsort_tracker.deepsort import DeepSort
 
 def ScreenToClipSpace(screenPos,pixelWidth,pixelHeight,farClipPlane, nearClipPlane):
 
@@ -156,7 +160,7 @@ def recvall(sock, n):
     return data    
 
 
-yolo = Yolo_Exec(weights='./yolov5s.pt', imgsz=[800],conf_thres=0.5, device='1', save_conf=True) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
+yolo = Yolo_Exec(weights='./yolov5s.pt', imgsz=[800],conf_thres=0.5, device='0', save_conf=True) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
 
 #source = '../../Delivery-2022-12-12/video1/'
 #files = sorted(glob.glob(os.path.join(source, '*.*')))
@@ -190,6 +194,7 @@ parser.add_argument('--port_to_server', type=int, help='Port to connect to send 
 parser.add_argument('--address_from_server', type=str, help='Address to connect to receive topic subscriptions')
 parser.add_argument('--port_from_server', type=int, help='Port to connect to receive topic subscriptions')
 parser.add_argument('--camera_id', type=int, help='Camera id')
+parser.add_argument('--track_alg', type=str, default='Byte' ,help='Track algorithm: Byte, Sort, DeepSort or MOTDT')
 
 
 args = parser.parse_args()
@@ -245,10 +250,34 @@ pixel_height = 600
 last_message_num = 0
 
 first_pass = True
-tracker = CentroidTracker(max_lost=5, tracker_output_format='mot_challenge')
+#tracker = SORT(max_lost=20, iou_threshold=0.0001, tracker_output_format='mot_challenge')
+#tracker = CentroidKF_Tracker(max_lost=20)
 
 decode_message = False
 
+old_tracks = []
+
+class ByteTrackArgs:
+    def __init__(self, track_thresh, match_thresh, track_buffer):
+        self.track_thresh = track_thresh
+        self.match_thresh = match_thresh
+        self.mot20 = False 
+        self.track_buffer = track_buffer
+
+
+
+track_alg = args.track_alg
+
+if track_alg == 'Byte':
+    new_args = ByteTrackArgs(0.5,0.8, 20)
+    tracker = BYTETracker(new_args, frame_rate=10)
+elif track_alg == 'Sort':
+    tracker = Sort(new_args.track_thresh)
+elif track_alg == 'MOTDT':
+    tracker = OnlineTracker('trackers/pretrained/googlenet_part8_all_xavier_ckpt_56.h5', use_tracking=False)
+elif track_alg == 'DeepSort':
+    tracker = DeepSort('trackers/pretrained/ckpt.t7')
+    
 while True:    
     
     try:
@@ -316,6 +345,8 @@ while True:
     image_np = np.frombuffer(image, dtype=np.dtype("uint8"))#.reshape(2560,1440)
     image = cv2.cvtColor( image_np.reshape(600,800,4), cv2.COLOR_BGRA2BGR )
     
+    if track_alg == 'MOTDT' or track_alg == 'DeepSort':
+        image2 = image.copy()
     
     # Add the traffic camera label to it
     # font
@@ -360,7 +391,15 @@ while True:
         
         for line in res_lines:
             coordinates_line = line.split()
-            box_voc = pbx.convert_bbox((float(coordinates_line[1]),float(coordinates_line[2]),float(coordinates_line[3]),float(coordinates_line[4])), from_type="yolo", to_type="coco", image_size=(pixel_width,pixel_height))
+            
+            if int(coordinates_line[0]) != 0:
+                continue
+            
+            box_voc = pbx.convert_bbox((float(coordinates_line[1]),float(coordinates_line[2]),float(coordinates_line[3]),float(coordinates_line[4])), from_type="yolo", to_type="voc", image_size=(pixel_width,pixel_height))
+            
+            cv2.rectangle(image, (box_voc[0], box_voc[1]), (box_voc[2], box_voc[3]), (0, 0, 255), 1)
+            cv2.imshow('image',image)
+            cv2.waitKey(1)
             
             if detection_bboxes.size == 0:
                 detection_bboxes = np.expand_dims(np.array(box_voc),axis=0)
@@ -370,11 +409,60 @@ while True:
             detection_class_ids = np.append(detection_class_ids, int(coordinates_line[0]))
             detection_confidences = np.append(detection_confidences, float(coordinates_line[-1]))
             
-        try:
-            o_tracks = tracker.update(detection_bboxes, detection_confidences, detection_class_ids)
-            print(o_tracks)
-        except:
-            pdb.set_trace()
+       
+        #o_tracks = tracker.update(detection_bboxes, detection_confidences, detection_class_ids)
+        #pdb.set_trace()
+        
+        if detection_bboxes.size > 0:
+        
+            if track_alg == 'MOTDT' or track_alg == 'DeepSort':
+                online_targets = tracker.update(np.column_stack((detection_bboxes,detection_confidences)), [pixel_height, pixel_width], (pixel_height,pixel_width), image2)
+            else:
+                online_targets = tracker.update(np.column_stack((detection_bboxes,detection_confidences)), [pixel_height, pixel_width], (pixel_height,pixel_width))
+            
+            new_tracks = []
+            #pdb.set_trace()
+            for t_idx,t in enumerate(online_targets):
+                
+                if track_alg == 'Sort' or track_alg == 'DeepSort':
+                    track_id = int(t[4])
+                    bbox = t[:4]
+                else:
+                    track_id = t.track_id
+                    bbox = t.tlbr
+                
+     
+                
+                new_tracks.append(track_id)
+                
+                if track_id not in tracks:
+                    class_detected = detection_class_ids[t_idx]
+                else:
+                    class_detected = tracks[track_id][2]
+                
+                tracks[track_id] = (bbox,f_idx,class_detected)
+                if track_id not in state:
+                    state[track_id] = {}
+                    state = state_init(state,track_id,functions,function_metadata)
+                
+            
+            if set(new_tracks) != set(old_tracks):
+                print("New tracks:",  new_tracks, online_targets)
+                
+            old_tracks = new_tracks
+            '''
+            new_tracks = []
+            for ot in o_tracks:    
+                new_tracks.append(ot[1])
+            if set(new_tracks) != set(old_tracks):
+                print("New tracks:",  new_tracks, o_tracks)
+                
+            old_tracks = new_tracks
+            #print(o_tracks)
+            '''
+        
+        
+    '''
  
     #We read the detection file and iterate over the bounding box lines
     for line in res_lines:
@@ -439,7 +527,7 @@ while True:
         del state[t_key]
         
     #print(tracks)
-    
+    '''
     for f in functions:
         #Apply functions according to query (right now only two tripwires are checked)
         res,state = eval(f+"(tracks,state,function_metadata['" + f +"'])")
