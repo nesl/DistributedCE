@@ -151,7 +151,7 @@ def emptyNet():
 	# First, load up CARLA and the xterm for running the connection
 	h1.cmd("./h1_1.sh")
 	time.sleep(5)
-	h1_pid = h1.cmd("xterm -hold -e './h1_2.sh' &")
+	h1_pid = h1.cmd("xterm -hold -e './h1_2.sh " + simulator_ip_address + "' &")
 	
 	#ZMQ brokers
 	h3_pid = h3.cmd("xterm -hold -e './broker.sh " + str(broker_1_port_consumers) + " " + str(broker_1_port_producers) + "' &")

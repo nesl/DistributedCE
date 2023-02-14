@@ -581,32 +581,50 @@ def create_multitude(num_pedestrians,destination_locations,walkerModels):
         actors_bb.append(ped)
         
 
-def activate_cameras(output_dir,cameras):
+def activate_cameras(output_dir,cameras, camera_function, bind_address):
 
     points_data = read_data("locations.txt")
     camera_descriptions = [x for x in points_data if "tc" in x[-1] and int(x[-1][2:]) in cameras]
 
+    stop_listening_event = threading.Event()
 
     for c in camera_descriptions:
 
-        depth_camera = depthCamera at c[0] @ -c[1], 
-            with elevation c[2],
-            with pitch c[3],
-            with yaw c[4],
-            with roll 0
+        if camera_function == 'CameraBehavior':
+                depth_camera = depthCamera at c[0] @ -c[1], 
+                    with elevation c[2],
+                    with pitch c[3],
+                    with yaw c[4],
+                    with roll 0
 
-        rgbCamera at depth_camera,
-            with elevation c[2],
-            with pitch c[3],
-            with yaw c[4],
-            with roll 0,
-            with depth depth_camera, 
-            with camera_id int(c[-1][-1]),
-            with behavior CameraBehavior(output_dir)
+                rgbCamera at depth_camera,
+                    with elevation c[2],
+                    with pitch c[3],
+                    with yaw c[4],
+                    with roll 0,
+                    with depth depth_camera, 
+                    with camera_id int(c[-1][-1]),
+                    with behavior CameraBehavior(output_dir)
+        else:
+                camera_id = int(c[-1][-1])
+                print(camera_id)
+                server_socket = setup_connections_and_handling(camera_id, bind_address)
+                
+                
+                #Review this camera_id
+                rgbCamera at c[0] @ -c[1],
+                    with elevation c[2],
+                    with pitch c[3],
+                    with yaw c[4],
+                    with roll 0,
+                    with camera_id camera_id,
+                    with connected False,
+                    with behavior CameraStreamingBehavior(camera_id,server_socket,stop_listening_event,output_dir)
 
 
 
-def run_scenario(num_scenario=0,cameras_on=[], num_extra_pedestrians=0, output_dir="."):
+
+def run_scenario(num_scenario=0,cameras_on=[], num_extra_pedestrians=0, output_dir=".", bind_address=''):
     
     
     scenarios = [first_scenario,second_scenario,third_scenario,fourth_scenario, test_scenario]
@@ -616,8 +634,9 @@ def run_scenario(num_scenario=0,cameras_on=[], num_extra_pedestrians=0, output_d
     if num_extra_pedestrians > 0:
         create_multitude(num_extra_pedestrians,destination_locations,walkerModels)
     
+
     if cameras_on:
-        activate_cameras(output_dir=output_dir, cameras=cameras_on)
+        activate_cameras(output_dir=output_dir, cameras=cameras_on, camera_function='', bind_address=bind_address)
 
 
 #In this scenario, a pedestrian leaves a package and then leaves the scene. A second pedestrian comes afterwards and retrieves the package
@@ -758,7 +777,7 @@ def fourth_scenario():
 
 
 
-def setup_connections_and_handling(camera_id):
+def setup_connections_and_handling(camera_id, bind_address):
 
         # Insert our networking stuff
         print("Setting up Server...", camera_id)
@@ -767,7 +786,7 @@ def setup_connections_and_handling(camera_id):
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server_socket.setblocking(0)
-        server_socket.bind(("10.0.0.1", 55000+camera_id))
+        server_socket.bind((bind_address, 55000+camera_id))
         server_socket.listen()
 
         
@@ -950,9 +969,12 @@ for i in range(100):
     actors_bb.append(ped)
 """
 
+cameras_on_str = globalParameters.cameras_on.split(',')
+cameras_on = [int(x) for x in cameras_on_str]
 
 
-run_scenario(num_scenario=4,num_extra_pedestrians=0, output_dir="camera_img/", cameras_on = [])
+
+run_scenario(num_scenario=int(globalParameters.num_scenario),num_extra_pedestrians=int(globalParameters.num_extra_pedestrians), output_dir=globalParameters.output_dir, bind_address=globalParameters.bind_address, cameras_on = cameras_on)
 
 
 

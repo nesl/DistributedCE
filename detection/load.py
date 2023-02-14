@@ -160,7 +160,37 @@ def recvall(sock, n):
     return data    
 
 
-yolo = Yolo_Exec(weights='./yolov5s.pt', imgsz=[800],conf_thres=0.5, device='0', save_conf=True) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
+def get_metadata_matrix(metadata, f_idx):
+
+    inv_matrix_meta = metadata[f_idx]["CameraDatapoints"][1]["InverseViewProjectionMatrix"]
+    #pixel_width = metadata[f_idx]["CameraDatapoints"][1]["PixelWidth"]
+    #pixel_height = metadata[f_idx]["CameraDatapoints"][1]["PixelHeight"]
+    near_clip_plane = metadata[f_idx]["CameraDatapoints"][1]["NearClipPlane"]
+    far_clip_plane = metadata[f_idx]["CameraDatapoints"][1]["FarClipPlane"]
+    camera_height = metadata[f_idx]["CameraDatapoints"][1]["CameraPosition"]["y"]
+    inv_matrix = np.zeros((4,4))
+    
+    
+    #We load the inverse view projection matrix
+    inv_matrix[0,0] = inv_matrix_meta["m00"]
+    inv_matrix[1,0] = inv_matrix_meta["m10"]
+    inv_matrix[2,0] = inv_matrix_meta["m20"]
+    inv_matrix[3,0] = inv_matrix_meta["m30"]
+    inv_matrix[0,1] = inv_matrix_meta["m01"]
+    inv_matrix[1,1] = inv_matrix_meta["m11"]
+    inv_matrix[2,1] = inv_matrix_meta["m21"]
+    inv_matrix[3,1] = inv_matrix_meta["m31"]
+    inv_matrix[0,2] = inv_matrix_meta["m02"]
+    inv_matrix[1,2] = inv_matrix_meta["m12"]
+    inv_matrix[2,2] = inv_matrix_meta["m22"]
+    inv_matrix[3,2] = inv_matrix_meta["m32"]
+    inv_matrix[0,3] = inv_matrix_meta["m03"]
+    inv_matrix[1,3] = inv_matrix_meta["m13"]
+    inv_matrix[2,3] = inv_matrix_meta["m23"]
+    inv_matrix[3,3] = inv_matrix_meta["m33"]
+    
+    return inv_matrix, camera_height, far_clip_plane, near_clip_plane
+    
 
 #source = '../../Delivery-2022-12-12/video1/'
 #files = sorted(glob.glob(os.path.join(source, '*.*')))
@@ -194,59 +224,44 @@ parser.add_argument('--port_to_server', type=int, help='Port to connect to send 
 parser.add_argument('--address_from_server', type=str, help='Address to connect to receive topic subscriptions')
 parser.add_argument('--port_from_server', type=int, help='Port to connect to receive topic subscriptions')
 parser.add_argument('--camera_id', type=int, help='Camera id')
-parser.add_argument('--track_alg', type=str, default='Byte' ,help='Track algorithm: Byte, Sort, DeepSort or MOTDT')
+parser.add_argument('--track_alg', type=str, default='Byte', help='Track algorithm: Byte, Sort, DeepSort or MOTDT')
+parser.add_argument('--video-file', type=str, default='', help='Open video file instead of connecting to server')
+parser.add_argument('--yolo-weights', type=str, default='./yolov5s.pt', help="YOLO weights file")
+parser.add_argument('--device', type=str, default='0', help="Device where to run YOLO")
+parser.add_argument('--metadata', type=str, help='Camera metadata file')
 
 
 args = parser.parse_args()
 
 
+
+
 address = args.address
 port = args.port
 
-#function_metadata['cross_tripwire'] = [tripwire1,tripwire2]
-'''
-for f_idx in range(len(metadata)):
-    #pdb.set_trace()
+
+
+
+if args.video_file:
+    cap = cv2.VideoCapture(args.video_file)
+    pixel_width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+    pixel_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
     
-    inv_matrix_meta = metadata[f_idx]["CameraDatapoints"][1]["InverseViewProjectionMatrix"]
-    pixel_width = metadata[f_idx]["CameraDatapoints"][1]["PixelWidth"]
-    pixel_height = metadata[f_idx]["CameraDatapoints"][1]["PixelHeight"]
-    near_clip_plane = metadata[f_idx]["CameraDatapoints"][1]["NearClipPlane"]
-    far_clip_plane = metadata[f_idx]["CameraDatapoints"][1]["FarClipPlane"]
-    camera_height = metadata[f_idx]["CameraDatapoints"][1]["CameraPosition"]["y"]
-    inv_matrix = np.zeros((4,4))
-    
-    
-    #We load the inverse view projection matrix
-    inv_matrix[0,0] = inv_matrix_meta["m00"]
-    inv_matrix[1,0] = inv_matrix_meta["m10"]
-    inv_matrix[2,0] = inv_matrix_meta["m20"]
-    inv_matrix[3,0] = inv_matrix_meta["m30"]
-    inv_matrix[0,1] = inv_matrix_meta["m01"]
-    inv_matrix[1,1] = inv_matrix_meta["m11"]
-    inv_matrix[2,1] = inv_matrix_meta["m21"]
-    inv_matrix[3,1] = inv_matrix_meta["m31"]
-    inv_matrix[0,2] = inv_matrix_meta["m02"]
-    inv_matrix[1,2] = inv_matrix_meta["m12"]
-    inv_matrix[2,2] = inv_matrix_meta["m22"]
-    inv_matrix[3,2] = inv_matrix_meta["m32"]
-    inv_matrix[0,3] = inv_matrix_meta["m03"]
-    inv_matrix[1,3] = inv_matrix_meta["m13"]
-    inv_matrix[2,3] = inv_matrix_meta["m23"]
-    inv_matrix[3,3] = inv_matrix_meta["m33"]
+    if args.metadata:
+        f_metadata = open(args.metadata)
 
-'''
+        metadata = json.load(f_metadata)
 
+else:
+    client_socket = setup_socket()
+    client_socket.connect((address, port))
+    sock_from_server, sock_to_server = setup_zmq(args.address_from_server,args.address_to_server,args.port_from_server,args.port_to_server)
+    pixel_width = 800
+    pixel_height = 600
+    imgsz = pixel_width*pixel_height*4
 
-client_socket = setup_socket()
-client_socket.connect((address, port))
+yolo = Yolo_Exec(weights=args.yolo_weights, imgsz=[pixel_width],conf_thres=0.5, device=args.device, save_conf=True) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
 
-sock_from_server, sock_to_server = setup_zmq(args.address_from_server,args.address_to_server,args.port_from_server,args.port_to_server)
-
-imgsz = 800*600*4
-
-pixel_width = 800
-pixel_height = 600
 last_message_num = 0
 
 first_pass = True
@@ -278,6 +293,11 @@ elif track_alg == 'MOTDT':
 elif track_alg == 'DeepSort':
     tracker = DeepSort('trackers/pretrained/ckpt.t7')
     
+    
+
+    
+f_idx = -1
+
 while True:    
     
     try:
@@ -320,30 +340,44 @@ while True:
         
     
     
-    
-    try:
-        f_idx = int.from_bytes(recvall(client_socket, 2),'big')
+    if args.video_file:
+        
+        # Check if camera opened successfully
+        if (cap.isOpened()== False): 
+            print("Stream closed")
+            break
+            
+        ret, image = cap.read()
+        if not ret:
+            print("End of video stream")
+            cap.release()
+            break
+        f_idx += 1
+        
+    else:
+        try:
+            f_idx = int.from_bytes(recvall(client_socket, 2),'big')
 
-        image =recvall(client_socket, imgsz)
-    except:
-        print('Timeout')
-        #server_connection, addr = server_socket.accept()
-        client_socket = setup_socket()
-        connected = False
-        while not connected:  
-            # attempt to reconnect, otherwise sleep for 2 seconds  
-            try:  
-                client_socket.connect((address, port))
-                connected = True  
-                print( "re-connection successful" )  
-            except socket.error:  
-                sleep( 1 ) 
-        #server_connection.settimeout(5)
-        continue	
+            image =recvall(client_socket, imgsz)
+        except:
+            print('Timeout')
+            #server_connection, addr = server_socket.accept()
+            client_socket = setup_socket()
+            connected = False
+            while not connected:  
+                # attempt to reconnect, otherwise sleep for 2 seconds  
+                try:  
+                    client_socket.connect((address, port))
+                    connected = True  
+                    print( "re-connection successful" )  
+                except socket.error:  
+                    sleep( 1 ) 
+            #server_connection.settimeout(5)
+            continue	
 
-    #imageidx = int.from_bytes(server_connection.recv(2),"big")
-    image_np = np.frombuffer(image, dtype=np.dtype("uint8"))#.reshape(2560,1440)
-    image = cv2.cvtColor( image_np.reshape(600,800,4), cv2.COLOR_BGRA2BGR )
+        #imageidx = int.from_bytes(server_connection.recv(2),"big")
+        image_np = np.frombuffer(image, dtype=np.dtype("uint8"))#.reshape(2560,1440)
+        image = cv2.cvtColor( image_np.reshape(600,800,4), cv2.COLOR_BGRA2BGR )
     
     if track_alg == 'MOTDT' or track_alg == 'DeepSort':
         image2 = image.copy()
@@ -368,7 +402,9 @@ while True:
     #pdb.set_trace()
     #print("received ", f_idx)
     #files[f_idx]
+    #time_past = time.time()
     res_lines = yolo.run(image)
+    #print("Yolo exec time:", time.time()-time_past)
     
     # Using cv2.putText() method
     image = cv2.putText(image, 'Traffic Camera ID: ' + str(args.camera_id), org, font, 
@@ -379,11 +415,9 @@ while True:
     #res = open('exp5/labels/out-%04d.txt' %(f_idx+1))
     #res_lines = res.readlines()
  
-    if not res_lines:
-        cv2.imshow('image',image)
-        cv2.waitKey(1)
  
  
+    time_past = time.time()
     if res_lines:
         detection_bboxes = np.array([])
         detection_class_ids = np.array([])
@@ -392,14 +426,13 @@ while True:
         for line in res_lines:
             coordinates_line = line.split()
             
-            if int(coordinates_line[0]) != 0:
+            if int(coordinates_line[0]) != 0: #Only pedestrians
                 continue
             
             box_voc = pbx.convert_bbox((float(coordinates_line[1]),float(coordinates_line[2]),float(coordinates_line[3]),float(coordinates_line[4])), from_type="yolo", to_type="voc", image_size=(pixel_width,pixel_height))
             
             cv2.rectangle(image, (box_voc[0], box_voc[1]), (box_voc[2], box_voc[3]), (0, 0, 255), 1)
-            cv2.imshow('image',image)
-            cv2.waitKey(1)
+            
             
             if detection_bboxes.size == 0:
                 detection_bboxes = np.expand_dims(np.array(box_voc),axis=0)
@@ -410,7 +443,7 @@ while True:
             detection_confidences = np.append(detection_confidences, float(coordinates_line[-1]))
             
        
-        #o_tracks = tracker.update(detection_bboxes, detection_confidences, detection_class_ids)
+        o_tracks = tracker.update(detection_bboxes, detection_confidences, detection_class_ids)
         #pdb.set_trace()
         
         if detection_bboxes.size > 0:
@@ -450,7 +483,7 @@ while True:
                 print("New tracks:",  new_tracks, online_targets)
                 
             old_tracks = new_tracks
-            '''
+            """
             new_tracks = []
             for ot in o_tracks:    
                 new_tracks.append(ot[1])
@@ -459,10 +492,11 @@ while True:
                 
             old_tracks = new_tracks
             #print(o_tracks)
-            '''
+            """
+        '''
         
         
-    '''
+    
  
     #We read the detection file and iterate over the bounding box lines
     for line in res_lines:
@@ -528,6 +562,9 @@ while True:
         
     #print(tracks)
     '''
+    cv2.imshow('image',image)
+    cv2.waitKey(1)
+
     for f in functions:
         #Apply functions according to query (right now only two tripwires are checked)
         res,state = eval(f+"(tracks,state,function_metadata['" + f +"'])")
