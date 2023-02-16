@@ -53,7 +53,7 @@ def read_data(points_filepath="locations.txt"):
 def emptyNet():
 
 	# First, read in our different sensor locations
-	points_data = read_data("../simulator/locations.txt")
+	points_data = read_data("../ComplexEventSimulator/locations.txt")
 
 	"Create an empty network and add nodes to it."
 

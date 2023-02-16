@@ -442,8 +442,8 @@ while True:
             detection_class_ids = np.append(detection_class_ids, int(coordinates_line[0]))
             detection_confidences = np.append(detection_confidences, float(coordinates_line[-1]))
             
-       
-        o_tracks = tracker.update(detection_bboxes, detection_confidences, detection_class_ids)
+        #print(detection_bboxes)
+        #o_tracks = tracker.update(detection_bboxes, detection_confidences, detection_class_ids)
         #pdb.set_trace()
         
         if detection_bboxes.size > 0:

@@ -1,6 +1,6 @@
-[submodule "simulator/Scenic"]
-	path = simulator/Scenic
-	url = https://github.com/nesl/Scenic.git
 [submodule "detection/yolov5"]
 	path = detection/yolov5
 	url = https://github.com/nesl/yolov5.git
+[submodule "ComplexEventSimulator"]
+	path = ComplexEventSimulator
+	url = https://github.com/nesl/ComplexEventSimulator.git
