@@ -229,6 +229,8 @@ parser.add_argument('--video-file', type=str, default='', help='Open video file 
 parser.add_argument('--yolo-weights', type=str, default='./yolov5s.pt', help="YOLO weights file")
 parser.add_argument('--device', type=str, default='0', help="Device where to run YOLO")
 parser.add_argument('--metadata', type=str, help='Camera metadata file')
+parser.add_argument('--save-tracking-dir', type=str, default='', help='Save tracking results to the directory specified')
+parser.add_argument('--create-video', type=str, default='', help='Create video. Specify file name.')
 
 
 args = parser.parse_args()
@@ -244,8 +246,8 @@ port = args.port
 
 if args.video_file:
     cap = cv2.VideoCapture(args.video_file)
-    pixel_width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-    pixel_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    pixel_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    pixel_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
     if args.metadata:
         f_metadata = open(args.metadata)
@@ -281,6 +283,7 @@ class ByteTrackArgs:
 
 
 
+#Choose tracking algorithm
 track_alg = args.track_alg
 
 if track_alg == 'Byte':
@@ -293,13 +296,21 @@ elif track_alg == 'MOTDT':
 elif track_alg == 'DeepSort':
     tracker = DeepSort('trackers/pretrained/ckpt.t7')
     
-    
+#Create directory for saving tracking results
+if args.save_tracking_dir:
+    if not os.path.exists(args.save_tracking_dir):
+        os.makedirs(args.save_tracking_dir)
+
+#Create video file
+if args.create_video:
+    video = cv2.VideoWriter(args.create_video, cv2.VideoWriter_fourcc(*'MJPG'), 30, (pixel_width,pixel_height))
 
     
 f_idx = -1
 
 while True:    
     
+    #Non-blocking check for commands from server (primitive events to generate)
     try:
         topic, msg = sock_from_server.recv_multipart(flags=zmq.NOBLOCK)
         print("Receive message")
@@ -339,7 +350,7 @@ while True:
             
         
     
-    
+    #Open from video file or receive frames from network
     if args.video_file:
         
         # Check if camera opened successfully
@@ -379,33 +390,33 @@ while True:
         image_np = np.frombuffer(image, dtype=np.dtype("uint8"))#.reshape(2560,1440)
         image = cv2.cvtColor( image_np.reshape(600,800,4), cv2.COLOR_BGRA2BGR )
     
+    #Required for some tracking algorithms that rely on reid
     if track_alg == 'MOTDT' or track_alg == 'DeepSort':
         image2 = image.copy()
     
-    # Add the traffic camera label to it
-    # font
-    font = cv2.FONT_HERSHEY_SIMPLEX
-  
-    # org
-    org = (50, 50)
-  
-    # fontScale
-    fontScale = 1
-   
-    # COLOR in BGR
-    color = (0, 255, 0)
-  
-    # Line thickness of 2 px
-    thickness = 2
+    
+    
     
     
     #pdb.set_trace()
     #print("received ", f_idx)
     #files[f_idx]
     #time_past = time.time()
-    res_lines = yolo.run(image)
+    res_lines = yolo.run(image) #Run yolo
     #print("Yolo exec time:", time.time()-time_past)
     
+    
+    # Add the traffic camera label to images
+    # font
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    # org
+    org = (50, 50)
+    # fontScale
+    fontScale = 1
+    # COLOR in BGR
+    color = (0, 255, 0)
+    # Line thickness of 2 px
+    thickness = 2
     # Using cv2.putText() method
     image = cv2.putText(image, 'Traffic Camera ID: ' + str(args.camera_id), org, font, 
 	           fontScale, color, thickness, cv2.LINE_AA)
@@ -426,12 +437,16 @@ while True:
         for line in res_lines:
             coordinates_line = line.split()
             
-            if int(coordinates_line[0]) != 0: #Only pedestrians
+            if int(coordinates_line[0]) > 2: #Only pedestrians
                 continue
             
             box_voc = pbx.convert_bbox((float(coordinates_line[1]),float(coordinates_line[2]),float(coordinates_line[3]),float(coordinates_line[4])), from_type="yolo", to_type="voc", image_size=(pixel_width,pixel_height))
             
+
+            
+                               
             cv2.rectangle(image, (box_voc[0], box_voc[1]), (box_voc[2], box_voc[3]), (0, 0, 255), 1)
+            
             
             
             if detection_bboxes.size == 0:
@@ -445,6 +460,9 @@ while True:
         #print(detection_bboxes)
         #o_tracks = tracker.update(detection_bboxes, detection_confidences, detection_class_ids)
         #pdb.set_trace()
+        
+        
+        text_output = ''
         
         if detection_bboxes.size > 0:
         
@@ -477,12 +495,31 @@ while True:
                 if track_id not in state:
                     state[track_id] = {}
                     state = state_init(state,track_id,functions,function_metadata)
+                    
+                #Put label outside bounding box
+                fontScale = 0.5
+                color = (255, 153, 255)
+                image = cv2.putText(image, str(track_id), (int(bbox[0]),int(bbox[1])), font, 
+                               fontScale, color, thickness, cv2.LINE_AA)
+                               
+                if args.save_tracking_dir:
+                    text_output += "%f,%f,%f,%f,%d,%d\n" % (*bbox,track_id, class_detected)
                 
             
             if set(new_tracks) != set(old_tracks):
                 print("New tracks:",  new_tracks, online_targets)
                 
             old_tracks = new_tracks
+            
+            if args.save_tracking_dir:
+                 f = open(args.save_tracking_dir + '/' + str(f_idx) + '.txt', "w")
+                 f.write(text_output)
+                 f.close()
+                 
+            if args.create_video:
+                video.write(image)
+            
+                
             """
             new_tracks = []
             for ot in o_tracks:    
@@ -562,8 +599,8 @@ while True:
         
     #print(tracks)
     '''
-    cv2.imshow('image',image)
-    cv2.waitKey(1)
+    #cv2.imshow('image',image)
+    #cv2.waitKey(1)
 
     for f in functions:
         #Apply functions according to query (right now only two tripwires are checked)
@@ -602,3 +639,6 @@ while True:
     print(world_coordinates)
     pdb.set_trace()
     """
+    
+if args.create_video:
+    video.release()

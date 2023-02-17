@@ -1,0 +1,7 @@
+class_id, track_id1, starting_time1, speed1, track_id2, starting_time2, speed2, ..., track_idn, starting_timen, speedn
+#2,60,2.5,200,60,4,300,60,7,50
+#0,5,3,200
+#2,40,5,100
+2,5,2.5,200,5,4,300,5,7,50
+0,16,3,200
+2,18,5,100
