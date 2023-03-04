@@ -1,0 +1,52 @@
+{"scenario": [
+	{"camera": 1, "save_dir": "", "display_image": "frame1_1.jpg", "tracking_dir":"tracking_detections" , "vehicles":[
+
+		{"class": 0, "track": 5, "trajectory":[{"type":"time", "start":0, "speed": 200}]}, 
+		{"class": 0, "track": 5, "trajectory":[{"type":"time", "start":1, "speed": 200}]},
+		{"class": 0, "track": 5, "trajectory":[{"type":"time", "start":2, "speed": 200}]},
+		{"class": 0, "track": 5, "trajectory":[{"type":"time", "start":3, "speed": 200}]}
+		]
+	},
+	{"camera": 2, "save_dir": "", "display_image": "frame3_1.jpg", "tracking_dir":"tracking_detections_cam3" , "vehicles":[
+
+		{"class": 0, "track": 10, "trajectory":[{"type":"time", "start":0, "speed": 200},{"type":"location", "start":[1485,591], "speed": 0}, {"type":"location", "start":10, "speed": 0}, {"type":"location", "start":[1485,591], "speed": 0}]}, 
+		{"class": 0, "track": 10, "trajectory":[{"type":"time", "start":1, "speed": 200}, {"type":"location", "start":[1251,496], "speed": 0}]},
+		{"class": 0, "track": 10, "trajectory":[{"type":"time", "start":2, "speed": 200}, {"type":"location", "start":[381,492], "speed": 0}]},
+		{"class": 0, "track": 10, "trajectory":[{"type":"time", "start":3, "speed": 200}, {"type":"location", "start":[308,492], "speed": 0}]}
+		]
+	}
+	
+	
+],
+"non_scenario" : [ {"camera": 3, "save_dir": "", "display_image": "frame3_1.jpg", "tracking_dir":"tracking_detections_cam3" , "vehicles":[
+		{"class": 2, "track": 11, "trajectory":[
+			{"type":"time", "start":2.5, "speed": 200}, 
+			{"type":"time", "start":4, "speed": 300}, 
+			{"type":"location", "start":[333,622], "speed": 50}
+		]}, 
+		{"class": 0, "track": 10, "trajectory":[{"type":"time", "start":3, "speed": 200}]}, 
+		{"class": 2, "track": 17, "trajectory":[{"type":"time", "start":5, "speed": 100}]}
+		]
+	},
+	{"camera": 2, "save_dir": "", "display_image": "frame2_1.jpg", "tracking_dir":"tracking_detections_cam2_motdt" , "vehicles":[
+		{"class": 2, "track": 5, "trajectory":[
+			{"type":"time", "start":2.5, "speed": 200}, 
+			{"type":"time", "start":4, "speed": 300}, 
+			{"type":"location", "start":[333,622], "speed": 50}
+		]}, 
+		{"class": 0, "track": 16, "trajectory":[{"type":"time", "start":3, "speed": 200, "offset": 100}]}, 
+		{"class": 2, "track": 18, "trajectory":[{"type":"time", "start":5, "speed": 100}]}
+		]
+	},
+	{"camera": 0, "save_dir": "", "display_image": "frame1_1.jpg", "tracking_dir":"tracking_detections" , "vehicles":[
+		{"class": 2, "track": 60, "trajectory":[
+			{"type":"time", "start":2.5, "speed": 200}, 
+			{"type":"time", "start":4, "speed": 300}, 
+			{"type":"location", "start":[333,622], "speed": -50}
+		]}, 
+		{"class": 0, "track": 5, "trajectory":[{"type":"time", "start":3, "speed": 200, "offset": 100}]}, 
+		{"class": 2, "track": 40, "trajectory":[{"type":"time", "start":5, "speed": 100}]}
+		]
+	}
+]
+}
