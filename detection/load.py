@@ -26,6 +26,8 @@ from trackers.sort_tracker.sort import Sort
 from trackers.motdt_tracker.motdt_tracker import OnlineTracker
 from trackers.deepsort_tracker.deepsort import DeepSort
 
+from sklearn.cluster import AgglomerativeClustering
+
 def ScreenToClipSpace(screenPos,pixelWidth,pixelHeight,farClipPlane, nearClipPlane):
 
     w = screenPos[2]
@@ -143,11 +145,53 @@ def watchbox(tracks,state, watchboxes):
                 #pdb.set_trace()
                 results.append([results_tmp, state[t_key]['watchbox']['results'][results_tmp], t_key])
                 
-                
-            
+    return results,state     
+    
+#Speed function    
+def speed(tracks, state, speeds):
+    results = []
+    for t_key in tracks.keys():
+        select = np.where(speeds[:,1] == tracks[t_key][2])[0]
+        reference_point = [tracks[t_key][0][0]+(tracks[t_key][0][2] - tracks[t_key][0][0])/2, tracks[t_key][0][1] + (tracks[t_key][0][3] - tracks[t_key][0][1])/2]
         
+        if state[t_key]['speed']['data']:
+            distance = np.linalg.norm(state[t_key]['speed']['data'] - reference_point)
+            v = distance/(1/fps)
+            ptotal = np.absolute(v - speeds[select,0]) > 0.1
+            
+            results_tmp = np.logical_xor(ptotal,state[t_key]['speed']['results'][select])
+
+            results_tmp = np.nonzero(results_tmp)[0]
+            results_tmp = select[results_tmp]
+            state[t_key]['speed']['results'][select] = ptotal
+            
+            if results_tmp.size > 0:
+                results.append([results_tmp, state[t_key]['speed']['results'][results_tmp], t_key])
+        
+        state[t_key]['speed']['data'] = reference_point
+
+
         
     return results,state
+    
+    
+def convoy(tracks, state, groups):
+    results = []
+    
+    reference_points = [[tracks[t_key][0][0]+(tracks[t_key][0][2] - tracks[t_key][0][0])/2, tracks[t_key][0][1] + (tracks[t_key][0][3] - tracks[t_key][0][1])/2] for t_key in tracks.keys()]
+    
+    if len(reference_points) > 3:
+        clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=groups[0], linkage='single').fit_predict(reference_points)
+
+        _,label_counts = np.unique(clustering, return_counts=True)
+        
+        count_res = np.where(label_counts > 3)[0]
+        
+        if count_res.size > 0:
+            print("Convoy detected", clustering)
+            
+    
+    return results, state
     
 def recvall(sock, n):
     # Helper function to recv n bytes or return None if EOF is hit
@@ -209,10 +253,13 @@ track_id = 0
 function_metadata = {}
 functions = []
 
+fps = 10
+
 #Two different tripwires defined as the location with respect to the image width for a given pixel column
 #tripwire1 = 1300
 #tripwire2 = 1750
-#functions = ['cross_tripwire']
+functions = ['convoy']
+function_metadata['convoy'] = [80]
 
 
 
@@ -231,6 +278,7 @@ parser.add_argument('--device', type=str, default='0', help="Device where to run
 parser.add_argument('--metadata', type=str, help='Camera metadata file')
 parser.add_argument('--save-tracking-dir', type=str, default='', help='Save tracking results to the directory specified')
 parser.add_argument('--create-video', type=str, default='', help='Create video. Specify file name.')
+parser.add_argument('--yolo-synth-output', type=str, default='', help='Provide YOLO files and bypass the model. Specify the directory name.')
 
 
 args = parser.parse_args()
@@ -248,6 +296,7 @@ if args.video_file:
     cap = cv2.VideoCapture(args.video_file)
     pixel_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     pixel_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
     
     if args.metadata:
         f_metadata = open(args.metadata)
@@ -262,7 +311,8 @@ else:
     pixel_height = 600
     imgsz = pixel_width*pixel_height*4
 
-yolo = Yolo_Exec(weights=args.yolo_weights, imgsz=[pixel_width],conf_thres=0.5, device=args.device, save_conf=True) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
+if not args.yolo_synth_output:
+    yolo = Yolo_Exec(weights=args.yolo_weights, imgsz=[pixel_width],conf_thres=0.5, device=args.device, save_conf=True) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
 
 last_message_num = 0
 
@@ -402,7 +452,19 @@ while True:
     #print("received ", f_idx)
     #files[f_idx]
     #time_past = time.time()
-    res_lines = yolo.run(image) #Run yolo
+    
+    res_lines = []
+    
+    if args.yolo_synth_output:
+        filename = args.yolo_synth_output + '/' + str(args.camera_id) + '/' + str(f_idx) + '.txt'
+        
+        if os.path.exists(filename):
+            yolo_out = open(filename).readlines()
+            res_lines = list(map(lambda s: s.strip(), yolo_out))
+
+        
+    else:
+        res_lines = yolo.run(image) #Run yolo
     #print("Yolo exec time:", time.time()-time_past)
     
     
@@ -435,16 +497,19 @@ while True:
         detection_confidences = np.array([])
         
         for line in res_lines:
+        
             coordinates_line = line.split()
-            
+
             if int(coordinates_line[0]) > 2: #Only pedestrians
                 continue
             
-            box_voc = pbx.convert_bbox((float(coordinates_line[1]),float(coordinates_line[2]),float(coordinates_line[3]),float(coordinates_line[4])), from_type="yolo", to_type="voc", image_size=(pixel_width,pixel_height))
-            
+            if args.yolo_synth_output:
 
+                box_voc = (int(float(coordinates_line[1])),int(float(coordinates_line[2])),int(float(coordinates_line[3])),int(float(coordinates_line[4])))
+            else:
+                box_voc = pbx.convert_bbox((float(coordinates_line[1]),float(coordinates_line[2]),float(coordinates_line[3]),float(coordinates_line[4])), from_type="yolo", to_type="voc", image_size=(pixel_width,pixel_height))
+               
             
-                               
             cv2.rectangle(image, (box_voc[0], box_voc[1]), (box_voc[2], box_voc[3]), (0, 0, 255), 1)
             
             

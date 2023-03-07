@@ -1,18 +1,22 @@
 {"scenario": [
-	{"camera": 1, "save_dir": "", "display_image": "frame1_1.jpg", "tracking_dir":"tracking_detections" , "vehicles":[
+	{"camera": 1, "save_dir": "", "display_image": "frame1_1.jpg", "vehicles":[
 
-		{"class": 0, "track": 5, "trajectory":[{"type":"time", "start":0, "speed": 200}]}, 
-		{"class": 0, "track": 5, "trajectory":[{"type":"time", "start":1, "speed": 200}]},
-		{"class": 0, "track": 5, "trajectory":[{"type":"time", "start":2, "speed": 200}]},
-		{"class": 0, "track": 5, "trajectory":[{"type":"time", "start":3, "speed": 200}]}
+		{"class": 0, "track": 1, "trajectory":[{"type":"time", "start":0, "speed": 200, "offset":0}]}, 
+		{"class": 0, "track": 1, "trajectory":[{"type":"time", "start":0.25, "speed": 200, "offset":-10}]},
+		{"class": 0, "track": 1, "trajectory":[{"type":"time", "start":0.5, "speed": 200, "offset":0}]},
+		{"class": 0, "track": 1, "trajectory":[{"type":"time", "start":0.75, "speed": 200, "offset":-10}]},
+		{"class": 0, "track": 3, "trajectory":[{"type":"time", "start":2, "speed": 100}]},
+		{"class": 0, "track": 2, "trajectory":[{"type":"time", "start":5, "speed": 100}]}
+
+		
 		]
 	},
-	{"camera": 2, "save_dir": "", "display_image": "frame3_1.jpg", "tracking_dir":"tracking_detections_cam3" , "vehicles":[
+	{"camera": 3, "save_dir": "", "display_image": "frame3_1.jpg", "vehicles":[
 
-		{"class": 0, "track": 10, "trajectory":[{"type":"time", "start":0, "speed": 200},{"type":"location", "start":[1485,591], "speed": 0}, {"type":"location", "start":10, "speed": 0}, {"type":"location", "start":[1485,591], "speed": 0}]}, 
-		{"class": 0, "track": 10, "trajectory":[{"type":"time", "start":1, "speed": 200}, {"type":"location", "start":[1251,496], "speed": 0}]},
-		{"class": 0, "track": 10, "trajectory":[{"type":"time", "start":2, "speed": 200}, {"type":"location", "start":[381,492], "speed": 0}]},
-		{"class": 0, "track": 10, "trajectory":[{"type":"time", "start":3, "speed": 200}, {"type":"location", "start":[308,492], "speed": 0}]}
+		{"class": 0, "track": 1, "trajectory":[{"type":"time", "start":20, "speed": 200},{"type":"location", "start":[1485,591], "speed": 0}, {"type":"time", "start":29.25, "speed": -200}, {"type":"location", "start":[480,492], "speed": 0}]}, 
+		{"class": 0, "track": 1, "trajectory":[{"type":"time", "start":20.25, "speed": 200, "offset":-10}, {"type":"location", "start":[1420,496], "speed": 0,"offset":-10}, {"type":"time", "start":29, "speed": -200, "offset":-10}, {"type":"location", "start":[420,492], "speed": 0, "offset":-10}]},
+		{"class": 0, "track": 1, "trajectory":[{"type":"time", "start":20.5, "speed": 200}, {"type":"location", "start":[381,492], "speed": 0}]},
+		{"class": 0, "track": 1, "trajectory":[{"type":"time", "start":20.75, "speed": 200, "offset":-10}, {"type":"location", "start":[308,492], "speed": 0, "offset":-10}]}
 		]
 	}
 	
@@ -45,8 +49,21 @@
 			{"type":"location", "start":[333,622], "speed": -50}
 		]}, 
 		{"class": 0, "track": 5, "trajectory":[{"type":"time", "start":3, "speed": 200, "offset": 100}]}, 
-		{"class": 2, "track": 40, "trajectory":[{"type":"time", "start":5, "speed": 100}]}
+		{"class": 2, "track": 40, "trajectory":[{"type":"time", "start":5, "speed": 100}]},
+				{"class": 2, "track": 3, "trajectory":[{"type":"time", "start":3, "speed": 200, "offset":0}]},
+				
+		{"class": 2, "track": 3, "trajectory":[{"type":"time", "start":3.5, "speed": 200, "offset":-10}]},
+		{"class": 2, "track": 3, "trajectory":[{"type":"time", "start":4, "speed": 200, "offset":0}]},
+		{"class": 2, "track": 3, "trajectory":[{"type":"time", "start":4.5, "speed": 200, "offset":-10}]},
+		{"class": 2, "track": 3, "trajectory":[{"type":"time", "start":5, "speed": 200, "offset":0}]},
+		{"class": 2, "track": 3, "trajectory":[{"type":"time", "start":5.5, "speed": 200, "offset":-10}]},
+		{"class": 2, "track": 3, "trajectory":[{"type":"time", "start":6, "speed": 200, "offset":0}]},
+		{"class": 2, "track": 3, "trajectory":[{"type":"time", "start":6.5, "speed": 200, "offset":-10}]},
+		{"class": 2, "track": 3, "trajectory":[{"type":"time", "start":7, "speed": 200, "offset":0}]},
+		{"class": 2, "track": 3, "trajectory":[{"type":"time", "start":7.5, "speed": 200, "offset":-10}]}
 		]
 	}
 ]
 }
+
+

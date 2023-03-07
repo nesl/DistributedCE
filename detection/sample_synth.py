@@ -114,12 +114,15 @@ def get_config(scenario_file):
     return input_config
 
 #Get class information
-def get_class_info(input_config, tracking_dir, max_file):
+def get_class_info(input_config, classes):
 
     desired_classes = list(set([ic["class"] for ic in input_config]))
     class_info = {i:[] for i in desired_classes}
     
-   
+    for line_class in desired_classes:
+        class_info[line_class] = classes[str(line_class)]
+    
+    '''
     for i in range(max_file+1):
         file_name = tracking_dir + '/' + str(i)+'.txt'
         if os.path.isfile(file_name):
@@ -135,16 +138,21 @@ def get_class_info(input_config, tracking_dir, max_file):
                 
         if not desired_classes:
             break
-            
+    '''
+      
     return class_info
 
 #Get trajectory information
-def get_track_points(input_config, skip_files, tracking_dir ,max_file):
+def get_track_points(input_config, skip_files, points):
 
     desired_track_id = [ic["track"] for ic in input_config]
     data = {i:{'box_center':[]} for i in desired_track_id}
     
+    for track_id in desired_track_id:
+        data[track_id]['box_center'] = points[str(track_id)][::skip_files]
     
+
+    '''
     for i in range(0, max_file+1, skip_files):
         file_name = tracking_dir + '/' + str(i)+'.txt'
         if os.path.isfile(file_name):
@@ -159,7 +167,7 @@ def get_track_points(input_config, skip_files, tracking_dir ,max_file):
                     box = [int(float(line_split[0])), int(float(line_split[1]))]
                 
                     data[track_id]['box_center'].append(box)
-                    
+    '''             
     return data
     
 def process_points(data):
@@ -221,7 +229,7 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len):
                 number_points = abs(int(1/(speed/(t_max-0))*fps))
             elif speed == 0:
                 if p_idx < len(change_points)-1:
-                    if not type_of_change[p_idx+1] == "location":
+                    if not type_of_change[p_idx+1] == "time":
                         print("Error: When stopped, you need to specify a time for the next action")
                         return [],[]
                     period = change_points[p_idx+1] - change_points[p_idx]
@@ -353,6 +361,7 @@ if __name__ == "__main__":
     parser.add_argument('--fps', default=30, type=int, help='FPS')
     parser.add_argument('--skip-files', default=5, type=int, help='Number of files to skip when reading the tracking files')
     parser.add_argument('--display-image', default='frame_1.jpg', type=str, help='Name of image to display with animation')
+    parser.add_argument('--create-video', type=str, default='', help='Create video. Specify file name.')
 
     # sys.argv includes a list of elements starting with the program
     if len(sys.argv) < 2:
@@ -364,26 +373,39 @@ if __name__ == "__main__":
     json_f = open(args.scenario_file)
     json_data = json.load(json_f)
     
+    json_points = json.load(open("track_points.json"))
+    json_camera = json.load(open("track_classes.json"))
+    
     synth_data = {}
     starting_time = {}
     original_image = {}
     class_info = {}
     
+    video = {}
+
+    
     for cam in json_data["scenario"]:
         
 
         #Create directory for saving output results
-        if cam["save_dir"]:
-            if not os.path.exists(cam["save_dir"]):
-                os.makedirs(cam["save_dir"])
+        if args.save_output_dir:
+            
+            if not os.path.exists(args.save_output_dir):
+                os.makedirs(args.save_output_dir)
+                
+            if not os.path.exists(args.save_output_dir+'/'+ str(cam["camera"])):
+                os.makedirs(args.save_output_dir+'/'+ str(cam["camera"]))
 
 
+            
+        '''
         cmd = 'ls ' + cam["tracking_dir"] + '/ | sort -n | tail -n 1'
         out = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         output = out.communicate()[0]
 
 
         max_file = int(output[:-5])
+        
         #print(max_file)
 
 
@@ -393,16 +415,22 @@ if __name__ == "__main__":
         #input_config = get_config(cam["vehicles"])
 
 
-        episode_length = args.episode_len
-        fps = args.fps
+
 
 
         class_info[cam["camera"]] = get_class_info(cam["vehicles"], cam["tracking_dir"], max_file)
 
 
         data = get_track_points(cam["vehicles"], args.skip_files, cam["tracking_dir"],max_file)  
-                        
-
+        '''
+        
+        episode_length = args.episode_len
+        fps = args.fps
+        
+        class_info[cam["camera"]] = get_class_info(cam["vehicles"], json_camera[str(cam["camera"])])
+             
+        data = get_track_points(cam["vehicles"], args.skip_files, json_points[str(cam["camera"])])
+        
         track_points = process_points(data)
             
 
@@ -412,6 +440,12 @@ if __name__ == "__main__":
 
 
         original_image[cam["camera"]] = cv2.imread(cam["display_image"])
+        
+                
+        if args.create_video:
+            pixel_height = original_image[cam["camera"]].shape[0]
+            pixel_width = original_image[cam["camera"]].shape[1]
+            video[cam["camera"]] = cv2.VideoWriter(args.create_video + str(cam["camera"]) + '.mp4', cv2.VideoWriter_fourcc(*'MJPG'), 30, (pixel_width,pixel_height))
 
 
     #Print/save results
@@ -430,26 +464,41 @@ if __name__ == "__main__":
                         display_point = (int(synth_data[cam["camera"]][s_idx][0][i-s]),int(synth_data[cam["camera"]][s_idx][1][i-s]))
                         
                         
-                        if args.display:
-                            #image = cv2.circle(image, display_point, radius=0, color=(0, 0, 255), thickness=10)
-                            image = cv2.rectangle(image, display_point, (display_point[0]+class_info[cam["camera"]][synth_data[cam["camera"]][s_idx][3]][0],display_point[1]+class_info[cam["camera"]][synth_data[cam["camera"]][s_idx][3]][1]), (0, 0, 255), 1)
+                    
+                        #image = cv2.circle(image, display_point, radius=0, color=(0, 0, 255), thickness=10)
+
+                        display_point2 = (int(display_point[0]+class_info[cam["camera"]][synth_data[cam["camera"]][s_idx][3]][0]),int(display_point[1]+class_info[cam["camera"]][synth_data[cam["camera"]][s_idx][3]][1]))
+                        
+                        image = cv2.rectangle(image, display_point, display_point2, (0, 0, 255), 1)
                         
                         if args.save_output_dir:
-                            text_output += "%f,%f,%f,%f,%d,%d\n" % (*display_point,*class_info[cam["camera"]][synth_data[cam["camera"]][s_idx][3]], synth_data[cam["camera"]][s_idx][4], synth_data[cam["camera"]][s_idx][3])
+                            text_output += "%d %f %f %f %f %d\n" % (synth_data[cam["camera"]][s_idx][3], *display_point,*display_point2, 1)
                             create_file = True
                     else:
                         to_delete.append(s_idx)
+                        
+            try:
                 for d in to_delete:
                     del synth_data[cam["camera"]][d]
                     del starting_time[cam["camera"]][d]
+            except:
+                print("Error")
                     
-            if cam["save_dir"] and create_file:
-                 f = open(cam["save_dir"] + '/' + str(i) + '.txt', "w")
+            if args.save_output_dir and create_file:
+
+                 f = open(args.save_output_dir+'/'+ str(cam["camera"]) + '/' + str(i) + '.txt', "w")
                  f.write(text_output)
                  f.close()
                     
             if args.display:
                 cv2.imshow('image'+ str(cam["camera"]),image)
                 cv2.waitKey(1)
+                
+            if args.create_video:
+                video[cam["camera"]].write(image)
+
+    for cam in json_data["scenario"]:
+        if args.create_video:
+            video[cam["camera"]].release()
 
 
