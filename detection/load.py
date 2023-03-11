@@ -150,6 +150,9 @@ def watchbox(tracks,state, watchboxes):
 #Speed function    
 def speed(tracks, state, speeds):
     results = []
+    
+    speed_threshold = 0.1
+    
     for t_key in tracks.keys():
         select = np.where(speeds[:,1] == tracks[t_key][2])[0]
         reference_point = [tracks[t_key][0][0]+(tracks[t_key][0][2] - tracks[t_key][0][0])/2, tracks[t_key][0][1] + (tracks[t_key][0][3] - tracks[t_key][0][1])/2]
@@ -157,7 +160,7 @@ def speed(tracks, state, speeds):
         if state[t_key]['speed']['data']:
             distance = np.linalg.norm(state[t_key]['speed']['data'] - reference_point)
             v = distance/(1/fps)
-            ptotal = np.absolute(v - speeds[select,0]) > 0.1
+            ptotal = np.absolute(v - speeds[select,0]) > speed_threshold
             
             results_tmp = np.logical_xor(ptotal,state[t_key]['speed']['results'][select])
 

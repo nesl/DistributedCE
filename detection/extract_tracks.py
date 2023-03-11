@@ -1,6 +1,10 @@
 import json
 import subprocess
 import os
+from xml.dom import minidom
+import pdb
+from svgpathtools import svg2paths
+
 
 def get_metadata(scenario_file):
     f = open(scenario_file)
@@ -23,10 +27,14 @@ def get_metadata(scenario_file):
         line_split = l.strip().split(',')
 
         if line_split[0] not in input_config:
-            input_config[line_split[0]] = {}
+            input_config[line_split[0]] = []
+        '''
         if line_split[3] not in input_config[line_split[0]]:
             input_config[line_split[0]][line_split[3]] = []
-        input_config[line_split[0]][line_split[3]].append([int(line_split[1]),int(line_split[2])])
+        '''
+        
+        if line_split:
+            input_config[line_split[0]].append([int(line_split[1]),line_split[2]])
 
 
 
@@ -35,7 +43,7 @@ def get_metadata(scenario_file):
     return input_config
 
 
-
+'''
 #Get trajectory information
 def get_track_points(input_config, tracking_dir, desired_classes, max_file):
 
@@ -67,13 +75,34 @@ def get_track_points(input_config, tracking_dir, desired_classes, max_file):
 
                     
     return data, class_info
+'''
+
+
+def get_track_points(input_config):
     
-    
+    data = {}
+
+    for ip in input_config:
+
+        svg_file = ip[1]
+
+        data[int(ip[0])] = []
+        
+        paths, attributes = svg2paths(svg_file)
+        
+        for p in paths[0]:
+            box = [int(p.start.real), int(p.start.imag)]
+            data[int(ip[0])].append(box)
+            
+        box = [int(p.end.real), int(p.end.imag)]
+        data[int(ip[0])].append(box)
+        
+    return data
 
 metadata_f = get_metadata("tracks_metadata.txt")
 
 track_points_f = open("track_points.json", "w")
-track_classes_f = open("track_classes.json", "w")
+#track_classes_f = open("track_classes.json", "w")
 
 root_dict_points = {}
 root_dict_classes = {}
@@ -83,27 +112,31 @@ for key in metadata_f.keys():
     points = {}
     class_info = {}
 
-    for tracking_dir in metadata_f[key]:
 
-        cmd = 'ls ' + tracking_dir + '/ | sort -n | tail -n 1'
-        out = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        output = out.communicate()[0]
+    '''
+    cmd = 'ls ' + tracking_dir + '/ | sort -n | tail -n 1'
+    out = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    output = out.communicate()[0]
 
 
-        max_file = int(output[:-5])
+    max_file = int(output[:-5])
+    '''
         
-        desired_classes = [0,1,2]
-        
-        
-        points_tmp,class_info_tmp = get_track_points(metadata_f[key], tracking_dir, desired_classes, max_file)
-        
-        points.update(points_tmp)
-        
-        if not class_info:
-            class_info = class_info_tmp
+    desired_classes = [0,1,2]
+    
+    points = get_track_points(metadata_f[key])
+    
+    #points_tmp,class_info_tmp = get_track_points(metadata_f[key], tracking_dir, desired_classes, max_file)
+    
+    #points.update(points_tmp)
+    
+    '''
+    if not class_info:
+        class_info = class_info_tmp
+    '''
     
     root_dict_points[key] = points
-    root_dict_classes[key] = class_info
+    #root_dict_classes[key] = class_info
     
     
     
@@ -119,5 +152,5 @@ for key in metadata_f.keys():
     
     
 track_points_f.write(json.dumps(root_dict_points))
-track_classes_f.write(json.dumps(root_dict_classes))
+#track_classes_f.write(json.dumps(root_dict_classes))
     

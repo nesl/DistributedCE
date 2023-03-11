@@ -114,13 +114,23 @@ def get_config(scenario_file):
     return input_config
 
 #Get class information
-def get_class_info(input_config, classes):
+def get_class_info(input_config, classes, desired_classes):
 
-    desired_classes = list(set([ic["class"] for ic in input_config]))
-    class_info = {i:[] for i in desired_classes}
+    #desired_classes = list(set([ic["class"] for ic in input_config]))
+    class_info = {i:{"box":[],"image":[]} for i in desired_classes}
     
+
+        
+        
     for line_class in desired_classes:
-        class_info[line_class] = classes[str(line_class)]
+        class_info[line_class]["box"] = classes[str(line_class)]
+        #image_tmp = cv2.imread("crops/"+str(line_class)+'.jpg')
+        image_tmp = cv2.imread("crops/"+str(line_class)+'.png',cv2.IMREAD_UNCHANGED)
+
+
+        image_tmp = cv2.resize(image_tmp, (int(class_info[line_class]["box"][0]), int(class_info[line_class]["box"][1])), interpolation = cv2.INTER_AREA)
+        class_info[line_class]["image"] = image_tmp
+        
     
     '''
     for i in range(max_file+1):
@@ -143,13 +153,14 @@ def get_class_info(input_config, classes):
     return class_info
 
 #Get trajectory information
-def get_track_points(input_config, skip_files, points):
+def get_track_points(input_config, skip_files, points, desired_track_id):
 
-    desired_track_id = [ic["track"] for ic in input_config]
-    data = {i:{'box_center':[]} for i in desired_track_id}
+    #desired_track_id = [ic["track"] for ic in input_config]
+    data = {i:{'normal':[], 'reverse':[]} for i in desired_track_id}
     
     for track_id in desired_track_id:
-        data[track_id]['box_center'] = points[str(track_id)][::skip_files]
+        data[track_id]['normal'] = points[str(track_id)][::skip_files]
+        data[track_id]['reverse'] = list(reversed(points[str(track_id)][::skip_files]))
     
 
     '''
@@ -173,175 +184,300 @@ def get_track_points(input_config, skip_files, points):
 def process_points(data):
 
     track_points = {}
+   
 
     #Get points for each track
     for k in data.keys():
-        data_track = np.array(data[k]['box_center'])
+        for order in data[k].keys():
+            data_track = np.array(data[k][order])
 
 
-        x,y = data_track.T
-        xd = np.diff(x)
-        yd = np.diff(y)
-        dist = np.sqrt(xd**2+yd**2)
-        u = np.cumsum(dist)
-        u = np.hstack([[0],u])
+            x,y = data_track.T
+            xd = np.diff(x)
+            yd = np.diff(y)
+            dist = np.sqrt(xd**2+yd**2)
+            u = np.cumsum(dist)
+            u = np.hstack([[0],u])
 
-        track_points[k] = (u,x,y)
+            if k not in track_points:
+                track_points[k] = {}    
+            track_points[k][order] = (u,x,y)
         
     return track_points
 
 
-def get_equally_spaced_points(input_config, track_points, fps, episode_len):
+def check_constraints(synth_data, t_temp, x_temp, y_temp, ic_track):
+    for sd in synth_data:
+        if sd[5] == ic_track:
+            intersc, x_ind, y_ind = np.intersect1d(t_temp, sd[4], return_indices=True)                    
+            if intersc.size > 0:
+                for i in range(len(intersc)):
+                    res = np.linalg.norm(np.array([x_temp[x_ind[i]],y_temp[x_ind[i]]]) - np.array([sd[0][y_ind[i]],sd[1][y_ind[i]]]))
+                    if res < 10:
+                        return 1
+                        
+    return 0
+
+def get_equally_spaced_points(input_config, track_points, fps, episode_len, extra_vehicles):
 
     synth_data = []
     starting_time = []
     
+    orders = ["reverse" if "reverse" in ic and int(ic["reverse"]) else "normal" for ic in input_config]
+    
+    num_vehicles = len(input_config) + extra_vehicles
+     
+    
     #Interpolation
-    for ic_idx, ic in enumerate(input_config):
-        change_points = [-1 if speed_points["type"] == "location" else speed_points["start"] for speed_points in ic["trajectory"]]
-        type_of_change = [speed_points["type"] for speed_points in ic["trajectory"]]
-        speeds = [speed_points["speed"] for speed_points in ic["trajectory"]]
-        
-        
-        
-        t_min = 0
-        t_max = 0
-        xn = np.array([])
-        yn = np.array([])
-        
-        #u = track_points[ic[0]][0]
-        #x = track_points[ic[0]][1]
-        #y = track_points[ic[0]][2]
-        
-        #pdb.set_trace()
+    #for ic_idx, ic in enumerate(input_config):
+    for vehicle_idx in range(num_vehicles):
+    
+        if vehicle_idx >= len(input_config):
 
-        for p_idx, p in enumerate(change_points):
-        
-            speed = speeds[p_idx]
             
+            possible_classes = [0,2]
+            possible_orders = ["normal", "reverse"]
+            track_orders = [1,0,1,0]
+            
+            ic_class = possible_classes[int(np.random.randint(2, size=1))]
+            ic_trajectory = [{}]
+            ic_trajectory[0]["type"] = "time"
+                        
+            
+            ic_track = int(np.random.randint(4,size=1))
+            ic_order = possible_orders[track_orders[ic_track]]
+        else:
+            ic = input_config[vehicle_idx]
+            ic_class = ic["class"]
+            ic_trajectory = ic["trajectory"]
+            ic_track = ic["track"]
+            if "reverse" in ic and int(ic["reverse"]):
+                ic_order = "reverse"
+            else:
+                ic_order = "normal"
 
-            u = track_points[ic["track"]][0]
-            x = track_points[ic["track"]][1]
-            y = track_points[ic["track"]][2]
+        
+        solved = False
+        while not solved:
+        
+            solved = True
+
+            if vehicle_idx >= len(input_config):
+                ic_trajectory[0]["start"] = np.random.rand(1)*episode_len
+                ic_trajectory[0]["speed"] = np.random.normal(200, 10, 1)
             
             
-            if speed < 0:
-                number_points = abs(int(1/(speed/(t_max-0))*fps))
-            elif speed == 0:
-                if p_idx < len(change_points)-1:
-                    if not type_of_change[p_idx+1] == "time":
-                        print("Error: When stopped, you need to specify a time for the next action")
-                        return [],[]
+        
+
+            
+            
+            
+        
+            change_points = [-1 if speed_points["type"] == "location" else speed_points["start"] for speed_points in ic_trajectory]
+            type_of_change = [speed_points["type"] for speed_points in ic_trajectory]
+            speeds = [speed_points["speed"] for speed_points in ic_trajectory]
+            
+            reverses = []
+            
+            t_min = 0
+            t_max = 0
+            xn = np.array([])
+            yn = np.array([])
+            
+            #u = track_points[ic[0]][0]
+            #x = track_points[ic[0]][1]
+            #y = track_points[ic[0]][2]
+            
+            #pdb.set_trace()
+
+            for p_idx, p in enumerate(change_points):
+            
+                speed = speeds[p_idx]
+                
+               
+                u = track_points[ic_track][ic_order][0]
+                x = track_points[ic_track][ic_order][1]
+                y = track_points[ic_track][ic_order][2]
+
+                
+                #Get number of points based on speed
+                if speed < 0:
+                    number_points = abs(int(1/(speed/(t_max-0))*fps))
+                elif speed == 0: #If the vehicle stops
+                    if p_idx < len(change_points)-1:
+                        if not type_of_change[p_idx+1] == "time":
+                            print("Error: When stopped, you need to specify a time for the next action")
+                            return [],[]
+                        period = change_points[p_idx+1] - change_points[p_idx]
+                        
+                    else:
+                        period = episode_len - change_points[p_idx]
+                        
+                    period *= fps
+                    x_temp = np.full((int(period),), xn[-1])
+                    y_temp = np.full((int(period),), yn[-1])
+                    xn = np.concatenate((xn,x_temp))
+                    yn = np.concatenate((yn,y_temp))
+                    t_temp = np.arange(tn[-1]+1,tn[-1]+1+len(x_temp))
+                    tn = np.concatenate((tn,t_temp))
+                    continue
+                else:
+                    number_points = int(1/(speed/(u.max()-t_max))*fps)
+                
+                
+
+                if p_idx < len(change_points)-1: #If there are still more trajectory parts
+                
+                    if type_of_change[p_idx+1] == "location" or type_of_change[p_idx+1] == "location_range": #Particular point
+
+                        if speed < 0:
+                            t = np.linspace(t_max, 0, number_points)
+                        else:
+                            t = np.linspace(t_max, u.max(), number_points)
+                            
+                        #Get rest of trajectory
+                        xs = np.interp(t, u, x)
+                        ys = np.interp(t, u, y)
+                        
+                        min_value = -1
+                        min_index = -1
+                        
+                        
+                        if type_of_change[p_idx+1] == "location":
+                            x_location = ic["trajectory"][p_idx+1]["start"][0]
+                            y_location = ic["trajectory"][p_idx+1]["start"][1]
+                        elif type_of_change[p_idx+1] == "location_range":
+                            x_points = np.sort([ic["trajectory"][p_idx+1]["start"][0],ic["trajectory"][p_idx+1]["end"][0]])
+                            y_points = np.sort([ic["trajectory"][p_idx+1]["start"][1],ic["trajectory"][p_idx+1]["end"][1]])
+
+
+                            new_loc = np.random.uniform(low=[x_points[0],y_points[0]], high=[x_points[1],y_points[1]], size=(1,2))
+                            x_location = new_loc[0][0]
+                            y_location = new_loc[0][1]
+                        
+                        #Get the point that is closer to the location defined by the user
+                        for c_idx in range(len(xs)):
+
+                            dist = np.linalg.norm(np.array([xs[c_idx],ys[c_idx]])-np.array([x_location,y_location])) #location
+                            
+                            if min_value == -1 or min_value > dist:
+                                min_value = dist
+                                min_index = c_idx
+                                
+                        xd = np.diff(xs)
+                        yd = np.diff(ys)
+                        new_dist = np.sqrt(xd**2+yd**2)
+                        new_u = np.cumsum(new_dist)
+                        new_u = np.insert(new_u, 0,0)
+                        total_distance = new_u[min_index] #Get distances to get the point where the vehicle should change
+                        change_points[p_idx+1] = change_points[p_idx]+total_distance/abs(speed)
+                        
+                    elif type_of_change[p_idx+1] == "distance": #Only distance
+                        change_points[p_idx+1] = change_points[p_idx]+change_points[p_idx+1]/abs(speed)
+                        
                     period = change_points[p_idx+1] - change_points[p_idx]
                     
+                
                 else:
-                    period = episode_len - change_points[p_idx]
+                    period = -1
+                
                     
-                period *= fps
-                x_temp = np.full((int(period),), xn[-1])
-                y_temp = np.full((int(period),), yn[-1])
-                xn = np.concatenate((xn,x_temp))
-                yn = np.concatenate((yn,y_temp))
-                continue
-            else:
-                number_points = int(1/(speed/(u.max()-t_max))*fps)
-            
-            
 
-            if p_idx < len(change_points)-1:
-            
-                if type_of_change[p_idx+1] == "location": #Particular point
-
-                    if speed < 0:
-                        t = np.linspace(t_max, 0, number_points)
+                #If it's not the last  part of the trajectory
+                if period > -1:
+                    number_points = int(period*fps)
+                
+                    if not p_idx:
+                        t_min = 0
+                        t_max = speed*period
                     else:
-                        t = np.linspace(t_max, u.max(), number_points)
-                        
-                    xs = np.interp(t, u, x)
-                    ys = np.interp(t, u, y)
-                    
-                    min_value = -1
-                    min_index = -1
-                    for c_idx in range(len(xs)):
-                        dist = np.linalg.norm(np.array([xs[c_idx],ys[c_idx]])-np.array([ic["trajectory"][p_idx+1]["start"][0],ic["trajectory"][p_idx+1]["start"][1]]))
-                        
-                        if min_value == -1 or min_value > dist:
-                            min_value = dist
-                            min_index = c_idx
-                            
-                    xd = np.diff(xs)
-                    yd = np.diff(ys)
-                    new_dist = np.sqrt(xd**2+yd**2)
-                    new_u = np.cumsum(new_dist)
-                    new_u = np.insert(new_u, 0,0)
-                    total_distance = new_u[min_index]
-                    change_points[p_idx+1] = change_points[p_idx]+total_distance/abs(speed)
-                    
-                elif type_of_change[p_idx+1] == "distance": #Only distance
-                    change_points[p_idx+1] = change_points[p_idx]+change_points[p_idx+1]/abs(speed)
-                    
-                period = change_points[p_idx+1] - change_points[p_idx]
-                
-            
-            else:
-                period = -1
-            
-                
-
-            
-            if period > -1:
-                number_points = int(period*fps)
-            
-                if not p_idx:
-                    t_min = 0
-                    t_max = speed*period
+                        t_min = t_max
+                        t_max += speed*period
                 else:
                     t_min = t_max
-                    t_max += speed*period
-            else:
-                t_min = t_max
-                if speed < 0:
-                    t_max = 0
+                    if speed < 0:
+                        t_max = 0
+                    else:
+                        t_max = u.max()
+                
+                #print(t_min, t_max, period, speed, number_points)
+                #number_points = int(1/(speed/u.max())*fps)
+                #print(1/(speed/u.max()))
+
+                #t = np.linspace(0,u.max(),number_points)
+
+                #Make interpolation
+                t = np.linspace(t_min, t_max, number_points)
+
+                
+                x_temp = np.interp(t, u, x)
+                y_temp = np.interp(t, u, y)
+                
+                
+                #Compute lateral offset
+                if "offset" in ic["trajectory"][p_idx]:
+
+                    offset = ic["trajectory"][p_idx]["offset"]
+                    xsum = []
+                    ysum = []
+                    slope = []
+                    for c_idx in range(1,len(x_temp)):
+                        slope = (y_temp[c_idx]-y_temp[c_idx-1])/(x_temp[c_idx]-x_temp[c_idx-1])
+                        b = y_temp[c_idx] - slope*x_temp[c_idx] + offset
+                        y_temp[c_idx] = slope*x_temp[c_idx] + b
+            
+            
+
+            
+                
+                
+                #Append data points
+                if xn.size > 0:
+                    xn = np.concatenate((xn,x_temp))
+                    yn = np.concatenate((yn,y_temp))
+                    t_temp = np.arange(tn[-1]+1,tn[-1]+1+len(x_temp))
+                    tn = np.concatenate((tn,t_temp))
                 else:
-                    t_max = u.max()
-            
-            #print(t_min, t_max, period, speed, number_points)
-            #number_points = int(1/(speed/u.max())*fps)
-            #print(1/(speed/u.max()))
+                
+                    t_temp = np.arange(int(ic_trajectory[0]["start"]*fps),int(ic_trajectory[0]["start"]*fps)+len(x_temp))
+                    
+                    #Check constraints
+                    res = check_constraints(synth_data, t_temp, x_temp, y_temp, ic_track)
 
-            #t = np.linspace(0,u.max(),number_points)
+                    if res:
+                        solved = False
+                        #print("constraints not followed")
+                        if vehicle_idx < len(input_config):
+                            print("constraints not followed")
+                            quit()
+                        else:
+                            break
 
-            t = np.linspace(t_min, t_max, number_points)
+                            
+                
+                    xn = x_temp
+                    yn = y_temp
+                    tn = t_temp
+                    
+                
+                    
+                    
+                
+                #Add reverse times    
+                if speed < 0:
+                    reverses.append((True,tn[-1]+1))
+                else:
+                    reverses.append((False,tn[-1]+1))
 
-            
-            x_temp = np.interp(t, u, x)
-            y_temp = np.interp(t, u, y)
-            
-            if "offset" in ic["trajectory"][p_idx]:
 
-                offset = ic["trajectory"][p_idx]["offset"]
-                xsum = []
-                ysum = []
-                slope = []
-                for c_idx in range(1,len(x_temp)):
-                    slope = (y_temp[c_idx]-y_temp[c_idx-1])/(x_temp[c_idx]-x_temp[c_idx-1])
-                    b = y_temp[c_idx] - slope*x_temp[c_idx] + offset
-                    y_temp[c_idx] = slope*x_temp[c_idx] + b
+
+                    
+                
+        synth_data.append([xn,yn,xn.shape[0],ic_class,tn,ic_track,ic_order, reverses])
+        starting_time.append(int(ic_trajectory[0]["start"]*fps))
         
-            if xn.size > 0:
-                xn = np.concatenate((xn,x_temp))
-                yn = np.concatenate((yn,y_temp))
-            else:
-                xn = x_temp
-                yn = y_temp
-                
-                
-
-
-                
-                
-        synth_data.append([xn,yn,xn.shape[0],ic["class"],ic_idx])
-        starting_time.append(int(ic["trajectory"][0]["start"]*fps))
+        if vehicle_idx >= len(input_config):
+            print(ic_trajectory[0]["start"],ic_class, ic_track)
         #print(int(ic[waypoints_index][0][1]*fps), ic[0])
         
     return synth_data, starting_time
@@ -359,9 +495,10 @@ if __name__ == "__main__":
     parser.add_argument('--display', action='store_true', help='Display animation')
     parser.add_argument('--episode-len', default=30, type=int, help='Episode length in time (s)')
     parser.add_argument('--fps', default=30, type=int, help='FPS')
-    parser.add_argument('--skip-files', default=5, type=int, help='Number of files to skip when reading the tracking files')
+    parser.add_argument('--skip-files', default=1, type=int, help='Number of files to skip when reading the tracking files')
     parser.add_argument('--display-image', default='frame_1.jpg', type=str, help='Name of image to display with animation')
     parser.add_argument('--create-video', type=str, default='', help='Create video. Specify file name.')
+    parser.add_argument('--extra-vehicles', type=int, default=0, help='Number of extra vehicles to render')
 
     # sys.argv includes a list of elements starting with the program
     if len(sys.argv) < 2:
@@ -383,6 +520,22 @@ if __name__ == "__main__":
     
     video = {}
 
+
+    class_metadata =  {}
+    f = open('class_metadata.txt')
+    lines = f.readlines()
+    
+    for l_idx, l in enumerate(lines):
+        if not l_idx:
+            continue
+        line_split = l.strip().split(',')
+        
+        cam = str(line_split[0])
+        
+        if cam not in class_metadata:
+            class_metadata[cam] = {}
+        class_metadata[cam][str(line_split[1])] = [int(line_split[2]),int(line_split[3])]
+        
     
     for cam in json_data["scenario"]:
         
@@ -427,14 +580,17 @@ if __name__ == "__main__":
         episode_length = args.episode_len
         fps = args.fps
         
-        class_info[cam["camera"]] = get_class_info(cam["vehicles"], json_camera[str(cam["camera"])])
+        desired_classes = [0,2]
+        desired_tracks = [0,1,2,3]
+        
+        class_info[cam["camera"]] = get_class_info(cam["vehicles"], class_metadata[str(cam["camera"])], desired_classes)
              
-        data = get_track_points(cam["vehicles"], args.skip_files, json_points[str(cam["camera"])])
+        data = get_track_points(cam["vehicles"], args.skip_files, json_points[str(cam["camera"])], desired_tracks)
         
         track_points = process_points(data)
             
 
-        synth_data[cam["camera"]], starting_time[cam["camera"]] = get_equally_spaced_points(cam["vehicles"], track_points, fps, args.episode_len)
+        synth_data[cam["camera"]], starting_time[cam["camera"]] = get_equally_spaced_points(cam["vehicles"], track_points, fps, args.episode_len,args.extra_vehicles)
 
 
 
@@ -450,6 +606,8 @@ if __name__ == "__main__":
 
     #Print/save results
     
+
+    
     for i in range(episode_length*fps):
         for cam in json_data["scenario"]:
             image = original_image[cam["camera"]].copy()
@@ -461,15 +619,44 @@ if __name__ == "__main__":
             for s_idx,s in enumerate(starting_time[cam["camera"]]):
                 if i >= s:
                     if i < s+synth_data[cam["camera"]][s_idx][2]:
-                        display_point = (int(synth_data[cam["camera"]][s_idx][0][i-s]),int(synth_data[cam["camera"]][s_idx][1][i-s]))
-                        
+                        display_point = [int(synth_data[cam["camera"]][s_idx][0][i-s]),int(synth_data[cam["camera"]][s_idx][1][i-s])]
+                        display_point[0] = min(image.shape[1], display_point[0])
+                        display_point[1] = min(image.shape[0], display_point[1])
                         
                     
                         #image = cv2.circle(image, display_point, radius=0, color=(0, 0, 255), thickness=10)
 
-                        display_point2 = (int(display_point[0]+class_info[cam["camera"]][synth_data[cam["camera"]][s_idx][3]][0]),int(display_point[1]+class_info[cam["camera"]][synth_data[cam["camera"]][s_idx][3]][1]))
-                        
-                        image = cv2.rectangle(image, display_point, display_point2, (0, 0, 255), 1)
+                        if args.display or args.create_video:
+                            try:
+                                display_point2 = [int(display_point[0]+class_info[cam["camera"]][synth_data[cam["camera"]][s_idx][3]]["box"][0]),int(display_point[1]+class_info[cam["camera"]][synth_data[cam["camera"]][s_idx][3]]["box"][1])]
+                            except:
+                                pdb.set_trace()
+                            display_point2[0] = min(image.shape[1], display_point2[0])
+                            display_point2[1] = min(image.shape[0], display_point2[1])
+                            
+                            crop_image = class_info[cam["camera"]][synth_data[cam["camera"]][s_idx][3]]["image"]
+
+                            if "reverse" == synth_data[cam["camera"]][s_idx][6]:
+                                crop_image = cv2.flip(crop_image,1)
+                                
+
+                            if not i < synth_data[cam["camera"]][s_idx][7][0][1]:
+                                synth_data[cam["camera"]][s_idx][7].pop(0)
+                                
+                            if synth_data[cam["camera"]][s_idx][7][0] and synth_data[cam["camera"]][s_idx][7][0][0] and i < synth_data[cam["camera"]][s_idx][7][0][1]:
+                                crop_image = cv2.flip(crop_image,1)
+
+                            alpha_channel = 3
+                            crop_coords = np.where(crop_image[:,:,alpha_channel] > 0)
+
+                            crop_coords1 = np.where(display_point[1] + crop_coords[0] < display_point2[1])
+                            crop_coords2 = np.where(display_point[0] + crop_coords[1] < display_point2[0])
+                            final_crop_coords = np.intersect1d(crop_coords1,crop_coords2)
+
+                            #image[display_point[1]:display_point2[1],display_point[0]:display_point2[0]] = crop_image[0:display_point2[1]-display_point[1],0:display_point2[0]-display_point[0]]
+                            image[display_point[1]+crop_coords[0][final_crop_coords],display_point[0]+crop_coords[1][final_crop_coords]] = crop_image[crop_coords[0][final_crop_coords],crop_coords[1][final_crop_coords],:alpha_channel]
+
+                            #image = cv2.rectangle(image, display_point, display_point2, (0, 0, 255), 1)
                         
                         if args.save_output_dir:
                             text_output += "%d %f %f %f %f %d\n" % (synth_data[cam["camera"]][s_idx][3], *display_point,*display_point2, 1)
