@@ -206,14 +206,18 @@ def process_points(data):
     return track_points
 
 
-def check_constraints(synth_data, t_temp, x_temp, y_temp, ic_track):
+def check_constraints(synth_data, t_temp, x_temp, y_temp, ic_track, episode_len_fps, vehicle_separation):
+
+    #if max(t_temp) > episode_len_fps:
+    #    return 1
+
     for sd in synth_data:
         if sd[5] == ic_track:
             intersc, x_ind, y_ind = np.intersect1d(t_temp, sd[4], return_indices=True)                    
             if intersc.size > 0:
                 for i in range(len(intersc)):
                     res = np.linalg.norm(np.array([x_temp[x_ind[i]],y_temp[x_ind[i]]]) - np.array([sd[0][y_ind[i]],sd[1][y_ind[i]]]))
-                    if res < 10:
+                    if res < vehicle_separation:
                         return 1
                         
     return 0
@@ -222,6 +226,8 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
 
     synth_data = []
     starting_time = []
+    traffic_points = []
+    vehicle_separation = 50
     
     orders = ["reverse" if "reverse" in ic and int(ic["reverse"]) else "normal" for ic in input_config]
     
@@ -231,21 +237,22 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
     #Interpolation
     #for ic_idx, ic in enumerate(input_config):
     for vehicle_idx in range(num_vehicles):
+        
     
         if vehicle_idx >= len(input_config):
 
-            
+
             possible_classes = [0,2]
             possible_orders = ["normal", "reverse"]
             track_orders = [1,0,1,0]
             
             ic_class = possible_classes[int(np.random.randint(2, size=1))]
-            ic_trajectory = [{}]
-            ic_trajectory[0]["type"] = "time"
+
                         
             
             ic_track = int(np.random.randint(4,size=1))
             ic_order = possible_orders[track_orders[ic_track]]
+            
         else:
             ic = input_config[vehicle_idx]
             ic_class = ic["class"]
@@ -257,14 +264,29 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                 ic_order = "normal"
 
         
+        
         solved = False
         while not solved:
         
             solved = True
+            stopped = -1
+            constraints_checked = False
 
             if vehicle_idx >= len(input_config):
-                ic_trajectory[0]["start"] = np.random.rand(1)*episode_len
-                ic_trajectory[0]["speed"] = np.random.normal(200, 10, 1)
+                ic_trajectory = [{}]
+                ic_trajectory[0]["type"] = "time"
+                ic_trajectory[0]["start"] = np.random.rand(1)[0]*episode_len
+                ic_trajectory[0]["speed"] = np.random.normal(200, 10, 1)[0]
+                
+                for tp_idx in range(len(traffic_points)):
+                    if ic_trajectory[0]["start"]*fps >= traffic_points[tp_idx][2] and ic_track == traffic_points[tp_idx][3]:
+                        ic_order = "normal"
+                        ic_trajectory.append({"type":"location", "start":[traffic_points[tp_idx][0],traffic_points[tp_idx][1]] ,"speed": 0, "separation": traffic_points[tp_idx][4]})
+
+                        stopped = tp_idx
+                        #constraints_checked = True
+                        break
+
             
             
         
@@ -298,6 +320,10 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                 u = track_points[ic_track][ic_order][0]
                 x = track_points[ic_track][ic_order][1]
                 y = track_points[ic_track][ic_order][2]
+                
+                if "traffic" in ic_trajectory[p_idx]: #This is a point to generate traffic jam
+                    traffic_points.append([xn[-1],yn[-1],tn[-1], ic_track, vehicle_separation])
+
 
                 
                 #Get number of points based on speed
@@ -314,9 +340,16 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                         period = episode_len - change_points[p_idx]
                         
                     period *= fps
+                    
+                    if period < 0: #If period negative it means change is after episode ends
+                        solved = False
+                        break
+
                     x_temp = np.full((int(period),), xn[-1])
                     y_temp = np.full((int(period),), yn[-1])
+               
                     xn = np.concatenate((xn,x_temp))
+
                     yn = np.concatenate((yn,y_temp))
                     t_temp = np.arange(tn[-1]+1,tn[-1]+1+len(x_temp))
                     tn = np.concatenate((tn,t_temp))
@@ -342,10 +375,16 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                         min_value = -1
                         min_index = -1
                         
+                        extra_distance = 0
                         
                         if type_of_change[p_idx+1] == "location":
                             x_location = ic["trajectory"][p_idx+1]["start"][0]
                             y_location = ic["trajectory"][p_idx+1]["start"][1]
+                            
+                            if "separation" in ic_trajectory[p_idx+1]:
+                                extra_distance = ic_trajectory[p_idx+1]["separation"]
+
+                            
                         elif type_of_change[p_idx+1] == "location_range":
                             x_points = np.sort([ic["trajectory"][p_idx+1]["start"][0],ic["trajectory"][p_idx+1]["end"][0]])
                             y_points = np.sort([ic["trajectory"][p_idx+1]["start"][1],ic["trajectory"][p_idx+1]["end"][1]])
@@ -360,7 +399,7 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
 
                             dist = np.linalg.norm(np.array([xs[c_idx],ys[c_idx]])-np.array([x_location,y_location])) #location
                             
-                            if min_value == -1 or min_value > dist:
+                            if min_value == -1 or (min_value > dist and dist > extra_distance):
                                 min_value = dist
                                 min_index = c_idx
                                 
@@ -371,6 +410,11 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                         new_u = np.insert(new_u, 0,0)
                         total_distance = new_u[min_index] #Get distances to get the point where the vehicle should change
                         change_points[p_idx+1] = change_points[p_idx]+total_distance/abs(speed)
+                        
+                        if min_index == 0: #Starting position is outside image
+                            solved = False
+                            break
+
                         
                     elif type_of_change[p_idx+1] == "distance": #Only distance
                         change_points[p_idx+1] = change_points[p_idx]+change_points[p_idx+1]/abs(speed)
@@ -429,7 +473,7 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
             
 
             
-                
+
                 
                 #Append data points
                 if xn.size > 0:
@@ -441,18 +485,21 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                 
                     t_temp = np.arange(int(ic_trajectory[0]["start"]*fps),int(ic_trajectory[0]["start"]*fps)+len(x_temp))
                     
-                    #Check constraints
-                    res = check_constraints(synth_data, t_temp, x_temp, y_temp, ic_track)
+                    
+                    if not constraints_checked:
+                        #Check constraints
+                        res = check_constraints(synth_data, t_temp, x_temp, y_temp, ic_track, episode_len*fps, vehicle_separation)
 
-                    if res:
-                        solved = False
-                        #print("constraints not followed")
-                        if vehicle_idx < len(input_config):
-                            print("constraints not followed")
-                            quit()
+                        if res:
+                            solved = False
+                            #print("constraints not followed")
+                            if vehicle_idx < len(input_config):
+                                print("constraints not followed")
+                                quit()
+                            else:
+                                break
                         else:
-                            break
-
+                            print(t_temp[-1]/fps)
                             
                 
                     xn = x_temp
@@ -462,13 +509,15 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                 
                     
                     
-                
+                try:
                 #Add reverse times    
-                if speed < 0:
-                    reverses.append((True,tn[-1]+1))
-                else:
-                    reverses.append((False,tn[-1]+1))
-
+                    if speed < 0:
+                        reverses.append((True,tn[-1]+1))
+                    else:
+                        reverses.append((False,tn[-1]+1))
+                except:
+                    pdb.set_trace()
+                
 
 
                     
@@ -479,6 +528,12 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
         if vehicle_idx >= len(input_config):
             print(ic_trajectory[0]["start"],ic_class, ic_track)
         #print(int(ic[waypoints_index][0][1]*fps), ic[0])
+        
+        if stopped >= 0: #Make sure other vehicles stop farther away
+            traffic_points[stopped][4] += vehicle_separation
+            traffic_points[stopped][2] = ic_trajectory[0]["start"]*fps
+            print(stopped, traffic_points[stopped][4], traffic_points[stopped][2] )
+
         
     return synth_data, starting_time
 
@@ -639,13 +694,14 @@ if __name__ == "__main__":
                             if "reverse" == synth_data[cam["camera"]][s_idx][6]:
                                 crop_image = cv2.flip(crop_image,1)
                                 
-
+                            '''
                             if not i < synth_data[cam["camera"]][s_idx][7][0][1]:
                                 synth_data[cam["camera"]][s_idx][7].pop(0)
                                 
                             if synth_data[cam["camera"]][s_idx][7][0] and synth_data[cam["camera"]][s_idx][7][0][0] and i < synth_data[cam["camera"]][s_idx][7][0][1]:
                                 crop_image = cv2.flip(crop_image,1)
-
+                            '''
+                            
                             alpha_channel = 3
                             crop_coords = np.where(crop_image[:,:,alpha_channel] > 0)
 
