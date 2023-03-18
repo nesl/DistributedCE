@@ -81,6 +81,7 @@ import json
 
 waypoints_index = 2
 num_elements_waypoint = 5
+vehicle_separation = 20
 
 def get_config(scenario_file):
     f = open(scenario_file)
@@ -227,7 +228,7 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
     synth_data = []
     starting_time = []
     traffic_points = []
-    vehicle_separation = 50
+    
     
     orders = ["reverse" if "reverse" in ic and int(ic["reverse"]) else "normal" for ic in input_config]
     
@@ -242,11 +243,14 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
         if vehicle_idx >= len(input_config):
 
 
-            possible_classes = [0,2]
+            possible_classes = [2]
             possible_orders = ["normal", "reverse"]
             track_orders = [1,0,1,0]
             
-            ic_class = possible_classes[int(np.random.randint(2, size=1))]
+            if len(possible_classes)  > 1:
+                ic_class = possible_classes[int(np.random.randint(2, size=1))]
+            else:
+                ic_class = possible_classes[0]
 
                         
             
@@ -305,6 +309,7 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
             t_max = 0
             xn = np.array([])
             yn = np.array([])
+            rn = np.array([0]) #IMPORTANT INITIAL VALUE: this determines initial rotation for image
             
             #u = track_points[ic[0]][0]
             #x = track_points[ic[0]][1]
@@ -347,12 +352,27 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
 
                     x_temp = np.full((int(period),), xn[-1])
                     y_temp = np.full((int(period),), yn[-1])
+                    
+                    if "turn" in ic["trajectory"][p_idx]:
+                        turn_angle = np.deg2rad(ic["trajectory"][p_idx]["turn"])
+                    else:
+                        turn_angle = rn[-1]
+                    
+                    r_temp = np.full((int(period),), turn_angle)
+                    
+                    #r_temp[-1] = rn[-1] #Return to original position
                
                     xn = np.concatenate((xn,x_temp))
 
                     yn = np.concatenate((yn,y_temp))
+                    
+                    rn = np.concatenate((rn,r_temp))
+                    
                     t_temp = np.arange(tn[-1]+1,tn[-1]+1+len(x_temp))
                     tn = np.concatenate((tn,t_temp))
+                    
+                    
+                    
                     continue
                 else:
                     number_points = int(1/(speed/(u.max()-t_max))*fps)
@@ -419,6 +439,49 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                     elif type_of_change[p_idx+1] == "distance": #Only distance
                         change_points[p_idx+1] = change_points[p_idx]+change_points[p_idx+1]/abs(speed)
                         
+                    elif type_of_change[p_idx+1] == "straight_line": #Go straight through a direction
+                    
+                        
+                        period = int(change_points[p_idx+1]/abs(speed)*fps) #Distance is in change_points originally
+                        
+
+                        distances = np.array([(n+1)*(change_points[p_idx+1]/period) for n in range(period)])
+                        new_xs = np.array(distances*np.cos(np.deg2rad(ic["trajectory"][p_idx+1]["direction"])))
+                        new_ys = np.array(distances*np.sin(np.deg2rad(ic["trajectory"][p_idx+1]["direction"])))
+                        reference_point1 = [xn[-1],yn[-1]]
+                        reference_point2 = []
+                        for r_idx in range(-2,-len(xn)-1,-1):
+                            if reference_point1 != [xn[r_idx],yn[r_idx]]:
+                                reference_point2 = [xn[r_idx],yn[r_idx]]
+                                break
+                        
+                        if not reference_point2:
+                            print("No reference direction")
+                            quit()
+                        
+                        reference_vector = np.array(reference_point1) - np.array(reference_point2)
+                        
+                        angle_with_axis = np.arccos(reference_vector[0]/np.linalg.norm(reference_vector))
+                        
+                        x_temp = reference_point1[0] + new_xs*np.cos(angle_with_axis) - new_ys*np.sin(angle_with_axis)
+                        y_temp = reference_point1[1] + new_xs*np.sin(angle_with_axis) + new_ys*np.cos(angle_with_axis)
+                        
+                        r_temp = np.full((int(period),), angle_with_axis+np.deg2rad(ic["trajectory"][p_idx+1]["direction"]))
+                   
+                        xn = np.concatenate((xn,x_temp))
+
+                        yn = np.concatenate((yn,y_temp))
+                        t_temp = np.arange(tn[-1]+1,tn[-1]+1+len(x_temp))
+                        tn = np.concatenate((tn,t_temp))
+                        
+                        rn = np.concatenate((rn,r_temp))
+                        
+                        change_points[p_idx+1] = change_points[p_idx]+change_points[p_idx+1]/abs(speed)
+                        
+                        continue
+                        
+                        
+                        
                     period = change_points[p_idx+1] - change_points[p_idx]
                     
                 
@@ -435,10 +498,10 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                         t_min = 0
                         t_max = speed*period
                     else:
-                        t_min = t_max
+                        t_min = t_max + 1
                         t_max += speed*period
                 else:
-                    t_min = t_max
+                    t_min = t_max + 1
                     if speed < 0:
                         t_max = 0
                     else:
@@ -456,7 +519,19 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                 
                 x_temp = np.interp(t, u, x)
                 y_temp = np.interp(t, u, y)
-                
+
+                if xn.size > 0:
+                    reference_vector = np.diff([np.insert(x_temp,0,xn[-1]),np.insert(y_temp,0,yn[-1])])
+                else:
+                    reference_vector = np.diff([x_temp,y_temp])
+                    
+                r_temp = np.arccos(reference_vector[0]/np.linalg.norm(reference_vector,axis=0))
+                #kernel_size = fps
+                #kernel = np.ones(kernel_size) / kernel_size
+                #r_temp = np.convolve(r_temp, kernel, mode='same') #filter rotation data
+
+                #if np.any(np.isnan(r_temp)):
+                #    pdb.set_trace()
                 
                 #Compute lateral offset
                 if "offset" in ic["trajectory"][p_idx]:
@@ -474,6 +549,7 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
 
             
 
+                rn = np.concatenate((rn,r_temp))
                 
                 #Append data points
                 if xn.size > 0:
@@ -521,8 +597,8 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
 
 
                     
-                
-        synth_data.append([xn,yn,xn.shape[0],ic_class,tn,ic_track,ic_order, reverses])
+        
+        synth_data.append([xn,yn,xn.shape[0],ic_class,tn,ic_track,ic_order, reverses, rn])
         starting_time.append(int(ic_trajectory[0]["start"]*fps))
         
         if vehicle_idx >= len(input_config):
@@ -554,6 +630,7 @@ if __name__ == "__main__":
     parser.add_argument('--display-image', default='frame_1.jpg', type=str, help='Name of image to display with animation')
     parser.add_argument('--create-video', type=str, default='', help='Create video. Specify file name.')
     parser.add_argument('--extra-vehicles', type=int, default=0, help='Number of extra vehicles to render')
+    parser.add_argument('--num-scenario', type=int, default=0, help='Scenario number to simulate')
 
     # sys.argv includes a list of elements starting with the program
     if len(sys.argv) < 2:
@@ -592,7 +669,8 @@ if __name__ == "__main__":
         class_metadata[cam][str(line_split[1])] = [int(line_split[2]),int(line_split[3])]
         
     
-    for cam in json_data["scenario"]:
+    
+    for cam in json_data["scenario"][args.num_scenario]['script']:
         
 
         #Create directory for saving output results
@@ -635,7 +713,7 @@ if __name__ == "__main__":
         episode_length = args.episode_len
         fps = args.fps
         
-        desired_classes = [0,2]
+        desired_classes = [0,1,2]
         desired_tracks = [0,1,2,3]
         
         class_info[cam["camera"]] = get_class_info(cam["vehicles"], class_metadata[str(cam["camera"])], desired_classes)
@@ -664,7 +742,7 @@ if __name__ == "__main__":
 
     
     for i in range(episode_length*fps):
-        for cam in json_data["scenario"]:
+        for cam in json_data["scenario"][args.num_scenario]['script']:
             image = original_image[cam["camera"]].copy()
             
             to_delete = []
@@ -677,6 +755,7 @@ if __name__ == "__main__":
                         display_point = [int(synth_data[cam["camera"]][s_idx][0][i-s]),int(synth_data[cam["camera"]][s_idx][1][i-s])]
                         display_point[0] = min(image.shape[1], display_point[0])
                         display_point[1] = min(image.shape[0], display_point[1])
+                        rotation = round(np.rad2deg(synth_data[cam["camera"]][s_idx][8][i-s]))
                         
                     
                         #image = cv2.circle(image, display_point, radius=0, color=(0, 0, 255), thickness=10)
@@ -690,6 +769,10 @@ if __name__ == "__main__":
                             display_point2[1] = min(image.shape[0], display_point2[1])
                             
                             crop_image = class_info[cam["camera"]][synth_data[cam["camera"]][s_idx][3]]["image"]
+                            
+                            if rotation:
+                                M = cv2.getRotationMatrix2D((crop_image.shape[1]/2,crop_image.shape[0]/2),-rotation,1)
+                                crop_image = cv2.warpAffine(crop_image,M,(crop_image.shape[1],crop_image.shape[0])) 
 
                             if "reverse" == synth_data[cam["camera"]][s_idx][6]:
                                 crop_image = cv2.flip(crop_image,1)
@@ -740,7 +823,7 @@ if __name__ == "__main__":
             if args.create_video:
                 video[cam["camera"]].write(image)
 
-    for cam in json_data["scenario"]:
+    for cam in json_data["scenario"][args.num_scenario]['script']:
         if args.create_video:
             video[cam["camera"]].release()
 
