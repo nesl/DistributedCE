@@ -127,28 +127,29 @@ def watchbox(tracks,state, watchboxes):
     for t_key in tracks.keys():
 
             select = np.where(watchboxes[:,4] == tracks[t_key][2])[0]
-            reference_point = [tracks[t_key][0][0]+(tracks[t_key][0][2] - tracks[t_key][0][0])/2, tracks[t_key][0][1] + (tracks[t_key][0][3] - tracks[t_key][0][1])/2]
-            p1 = reference_point[0] - watchboxes[select,0] > 0
-            p2 = reference_point[1] - watchboxes[select,1] > 0
-            p3 = reference_point[0] - watchboxes[select,2] < 0
-            p4 = reference_point[1] - watchboxes[select,3] < 0
-            ptotal = p1 & p2 & p3 & p4
+            if select.size > 0:
+                reference_point = [tracks[t_key][0][0]+(tracks[t_key][0][2] - tracks[t_key][0][0])/2, tracks[t_key][0][1] + (tracks[t_key][0][3] - tracks[t_key][0][1])/2]
+                p1 = reference_point[0] - watchboxes[select,0] > 0
+                p2 = reference_point[1] - watchboxes[select,1] > 0
+                p3 = reference_point[0] - watchboxes[select,2] < 0
+                p4 = reference_point[1] - watchboxes[select,3] < 0
+                ptotal = p1 & p2 & p3 & p4
 
-            
-            try:
-                results_tmp = np.logical_xor(ptotal,state[t_key]['watchbox']['results'][select])
-            except:
-                pdb.set_trace()
-                print("Error")
-            #print(ptotal, state[t_key]['watchbox']['results'], results_tmp, t_key)
-            results_tmp = np.nonzero(results_tmp)[0]
-            results_tmp = select[results_tmp]
-            state[t_key]['watchbox']['results'][select] = ptotal
-            #state[t_key]['watchbox']['results'] = ptotal
-            
-            if results_tmp.size > 0:
-                #pdb.set_trace()
-                results.append([results_tmp.tolist(), state[t_key]['watchbox']['results'][results_tmp].tolist(), t_key])
+                
+                try:
+                    results_tmp = np.logical_xor(ptotal,state[t_key]['watchbox']['results'][select])
+                except:
+                    pdb.set_trace()
+                    print("Error")
+                #print(ptotal, state[t_key]['watchbox']['results'], results_tmp, t_key)
+                results_tmp = np.nonzero(results_tmp)[0]
+                results_tmp = select[results_tmp]
+                state[t_key]['watchbox']['results'][select] = ptotal
+                #state[t_key]['watchbox']['results'] = ptotal
+                
+                if results_tmp.size > 0:
+                    #pdb.set_trace()
+                    results.append([results_tmp.tolist(), state[t_key]['watchbox']['results'][results_tmp].tolist(), t_key])
                 
     return results,state     
     
@@ -638,7 +639,7 @@ while True:
                 online_targets = tracker.update(np.column_stack((detection_bboxes,detection_confidences)), [pixel_height, pixel_width], (pixel_height,pixel_width), image2)
             else:
                 bbox_stack = np.column_stack((detection_bboxes,detection_confidences))
-                online_targets = tracker.update(bbox_stack, [pixel_height, pixel_width], (pixel_height,pixel_width)) #check order of data error
+                online_targets = tracker.update(bbox_stack, [pixel_height, pixel_width], (pixel_height,pixel_width), detection_class_ids) #check order of data error
                 
             
             
@@ -652,7 +653,7 @@ while True:
                 else:
                     track_id = t.track_id
                     bbox = t.tlbr
-                    input_bbox = t.tlwh_to_tlbr(t.new_tlwh) #For Bytetracker, haven't tested with other ones
+                    class_history = t.detected_class #For Bytetracker, haven't tested with other ones
                 
      
                 
@@ -661,17 +662,7 @@ while True:
                 
 
                 
-                c_idx = (detection_bboxes[:]==input_bbox).all(1).nonzero()[0][0]
-                
-                class_history = []
-                
-                if track_id not in tracks:
-                    class_detected = detection_class_ids[c_idx]
-                    class_history.append(class_detected)
-                else:
-                    class_history = tracks[track_id][3]
-                    class_history.append(detection_class_ids[c_idx])
-                    class_detected = np.bincount(class_history).argmax()
+                class_detected = np.bincount(class_history).argmax()
                 
                 
                 tracks[track_id] = (bbox,f_idx,class_detected,class_history)

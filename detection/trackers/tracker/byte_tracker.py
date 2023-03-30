@@ -13,17 +13,18 @@ from .basetrack import BaseTrack, TrackState
 
 class STrack(BaseTrack):
     shared_kalman = KalmanFilter()
-    def __init__(self, tlwh, score):
+    def __init__(self, tlwh, score, detected_class):
 
         # wait activate
         self._tlwh = np.asarray(tlwh, dtype=np.float)
-        self.new_tlwh = self._tlwh
         self.kalman_filter = None
         self.mean, self.covariance = None, None
         self.is_activated = False
 
         self.score = score
         self.tracklet_len = 0
+        self.detected_class = [detected_class]
+        
 
     def predict(self):
         mean_state = self.mean.copy()
@@ -81,9 +82,10 @@ class STrack(BaseTrack):
         self.frame_id = frame_id
         self.tracklet_len += 1
 
-        self.new_tlwh = new_track.tlwh
+        self.detected_class.extend(new_track.detected_class)
+        
         self.mean, self.covariance = self.kalman_filter.update(
-            self.mean, self.covariance, self.tlwh_to_xyah(self.new_tlwh))
+            self.mean, self.covariance, self.tlwh_to_xyah(new_track.tlwh))
         self.state = TrackState.Tracked
         self.is_activated = True
 
@@ -158,7 +160,7 @@ class BYTETracker(object):
         self.max_time_lost = self.buffer_size
         self.kalman_filter = KalmanFilter()
 
-    def update(self, output_results, img_info, img_size):
+    def update(self, output_results, img_info, img_size, detected_class):
         self.frame_id += 1
         activated_starcks = []
         refind_stracks = []
@@ -188,8 +190,8 @@ class BYTETracker(object):
 
         if len(dets) > 0:
             '''Detections'''
-            detections = [STrack(STrack.tlbr_to_tlwh(tlbr), s) for
-                          (tlbr, s) in zip(dets, scores_keep)]
+            detections = [STrack(STrack.tlbr_to_tlwh(tlbr), s, detected_class[z_idx]) for
+                          z_idx,(tlbr, s) in enumerate(zip(dets, scores_keep))]
         else:
             detections = []
 
