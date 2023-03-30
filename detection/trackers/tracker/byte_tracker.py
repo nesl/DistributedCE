@@ -5,6 +5,7 @@ import os.path as osp
 import copy
 import torch
 import torch.nn.functional as F
+import pdb
 
 from .kalman_filter import KalmanFilter
 from yolox.tracker import matching
@@ -16,6 +17,7 @@ class STrack(BaseTrack):
 
         # wait activate
         self._tlwh = np.asarray(tlwh, dtype=np.float)
+        self.new_tlwh = self._tlwh
         self.kalman_filter = None
         self.mean, self.covariance = None, None
         self.is_activated = False
@@ -79,9 +81,9 @@ class STrack(BaseTrack):
         self.frame_id = frame_id
         self.tracklet_len += 1
 
-        new_tlwh = new_track.tlwh
+        self.new_tlwh = new_track.tlwh
         self.mean, self.covariance = self.kalman_filter.update(
-            self.mean, self.covariance, self.tlwh_to_xyah(new_tlwh))
+            self.mean, self.covariance, self.tlwh_to_xyah(self.new_tlwh))
         self.state = TrackState.Tracked
         self.is_activated = True
 

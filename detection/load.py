@@ -187,60 +187,85 @@ def convoy(tracks, state, groups):
     results = []
     
 
-    reference_points = np.array([[tracks[t_key][0][0]+(tracks[t_key][0][2] - tracks[t_key][0][0])/2, tracks[t_key][0][1] + (tracks[t_key][0][3] - tracks[t_key][0][1])/2, tracks[t_key][2], t_key] for t_key in tracks.keys()])
-    min_number_vehicles = 3
-    
-    res_per_track_id = {}
-    results_tmp = {}    
-    for g_idx,g in enumerate(groups):
-    
-        rp_idxs = np.where(reference_points[:,2] == g[1])[0] #Check error here
+    if tracks:
+        reference_points = np.array([[tracks[t_key][0][0]+(tracks[t_key][0][2] - tracks[t_key][0][0])/2, tracks[t_key][0][1] + (tracks[t_key][0][3] - tracks[t_key][0][1])/2, tracks[t_key][2], t_key] for t_key in tracks.keys()])
+        min_number_vehicles = 3
         
-        if len(reference_points) > min_number_vehicles and len(rp_idxs) > min_number_vehicles:
-            
-            
-            clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=g[0], linkage='single').fit_predict(reference_points[rp_idxs,:2])
+        res_per_track_id = {}
+        results_tmp = {}    
+        for g_idx,g in enumerate(groups):
+        
+            rp_idxs = np.where(reference_points[:,2] == g[1])[0] 
 
-            labels,label_counts = np.unique(clustering, return_counts=True)
-            #pdb.set_trace()
-            count_res = np.where(label_counts > min_number_vehicles)[0]
+            
+            if len(reference_points) > min_number_vehicles and len(rp_idxs) > min_number_vehicles:
+                
 
-            if count_res.size > 0:
-                for possible_convoy in count_res:
-                    track_idxs = np.where(clustering == labels[possible_convoy])[0]
-                    convoy_elements = reference_points[track_idxs,3]
-                    if state[convoy_elements[0]]['convoy']['results'][g_idx]:
-                        
-                        if not set(state[convoy_elements[0]]['convoy']['results'][g_idx]) == set(convoy_elements):
+                clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=g[0], linkage='single').fit_predict(reference_points[rp_idxs,:2])
+
+                labels,label_counts = np.unique(clustering, return_counts=True)
+                #pdb.set_trace()
+                count_res = np.where(label_counts > min_number_vehicles)[0]
+
+                if count_res.size > 0:
+                    
+                    for possible_convoy in count_res:
+                        track_idxs = np.where(clustering == labels[possible_convoy])[0]
+                        convoy_elements = reference_points[rp_idxs[track_idxs],3]
+                        if state[convoy_elements[0]]['convoy']['results'][g_idx]:
                             
-                            for t_key in tracks.keys():
+                            existing_elements = set(state[convoy_elements[0]]['convoy']['results'][g_idx])
+                            
+                            if not existing_elements == set(convoy_elements): # and len(existing_elements.intersection(set(convoy_elements))) > 0: #This means the number of vehicles in the convoy has changed and the clustering corresponds to the previous one?
+                            
+                                merged_elements = existing_elements.union(set(convoy_elements))
+                                
+                                for t_key in merged_elements:
+                                    #state[t_key]['convoy']['data'] = convoy_elements.tolist()
+                                    
+                                    
+                                    #print(t_key, "changed to True modified")
+                                    
+                                    if t_key in convoy_elements:
+                                        state[t_key]['convoy']['results'][g_idx] = convoy_elements.tolist()
+                                    else:
+                                        state[t_key]['convoy']['results'][g_idx] = []
+                                        
+                                    if t_key not in results_tmp:
+                                        results_tmp[t_key] = []
+
+                                    if t_key in convoy_elements:                                        
+                                        results_tmp[t_key].append([g_idx, convoy_elements.tolist()])
+                                    else:
+                                        results_tmp[t_key].append([g_idx, []])
+                                    #print(convoy_elements)
+                        else:
+
+                            for t_key in convoy_elements:
                                 #state[t_key]['convoy']['data'] = convoy_elements.tolist()
                                 
-                                
-                                #print(t_key, "changed to True modified")
-                                
-                                
+                                #print(t_key, "changed to True")
+                                #print(convoy_elements)
                                 state[t_key]['convoy']['results'][g_idx] = convoy_elements.tolist()
+                                
                                 if t_key not in results_tmp:
                                     results_tmp[t_key] = []
-                                    
+                                        
                                 results_tmp[t_key].append([g_idx, convoy_elements.tolist()])
-                                #print(convoy_elements)
-                    else:
-                        for t_key in tracks.keys():
-                            #state[t_key]['convoy']['data'] = convoy_elements.tolist()
-                            
-                            #print(t_key, "changed to True")
-                            #print(convoy_elements)
-                            state[t_key]['convoy']['results'][g_idx] = convoy_elements.tolist()
-                            
+                                
+                        
+                    #print("Convoy detected", clustering)
+                else:
+                    for t_key in tracks.keys():
+                        #state[t_key]['convoy']['data'] = []
+                        if state[t_key]['convoy']['results'][g_idx]:
+                            #print(t_key, "changed to False")
                             if t_key not in results_tmp:
                                 results_tmp[t_key] = []
-                                    
-                            results_tmp[t_key].append([g_idx, convoy_elements.tolist()])
-                            
-                    
-                #print("Convoy detected", clustering)
+                            results_tmp[t_key].append([g_idx, []])
+
+                        state[t_key]['convoy']['results'][g_idx] = []
+                        
             else:
                 for t_key in tracks.keys():
                     #state[t_key]['convoy']['data'] = []
@@ -251,21 +276,11 @@ def convoy(tracks, state, groups):
                         results_tmp[t_key].append([g_idx, []])
 
                     state[t_key]['convoy']['results'][g_idx] = []
-                    
-        else:
-            for t_key in tracks.keys():
-                #state[t_key]['convoy']['data'] = []
-                if state[t_key]['convoy']['results'][g_idx]:
-                    #print(t_key, "changed to False")
-                    if t_key not in results_tmp:
-                        results_tmp[t_key] = []
-                    results_tmp[t_key].append([g_idx, []])
 
-                state[t_key]['convoy']['results'][g_idx] = []
+        for result_key in results_tmp.keys():       
 
-    for result_key in results_tmp.keys():       
-
-        results.append([[group[0] for group in results_tmp[result_key]], [group[1] for group in results_tmp[result_key]], result_key])
+            #pdb.set_trace()
+            results.append([[group[0] for group in results_tmp[result_key]], [group[1] for group in results_tmp[result_key]], result_key])
         
     
     return results, state
@@ -336,7 +351,7 @@ fps = 10
 #tripwire1 = 1300
 #tripwire2 = 1750
 functions = ['convoy']
-function_metadata['convoy'] = [[80,0]]
+function_metadata['convoy'] = [[80,0],[200,1]]
 #functions = ['watchbox']
 #function_metadata['watchbox'] = np.array([[213,274,772,772,0], [816,366,1200,725,0], [1294,290,1881,765,0]])
 write_to_file_res = []
@@ -360,6 +375,7 @@ parser.add_argument('--metadata', type=str, help='Camera metadata file')
 parser.add_argument('--save-tracking-dir', type=str, default='', help='Save tracking results to the directory specified')
 parser.add_argument('--create-video', type=str, default='', help='Create video. Specify file name.')
 parser.add_argument('--yolo-synth-output', type=str, default='', help='Provide YOLO files and bypass the model. Specify the directory name.')
+parser.add_argument('--display', action='store_true', help='Display video')
 
 
 args = parser.parse_args()
@@ -545,7 +561,9 @@ while True:
 
         
     else:
+        #start_time = time.time()
         res_lines = yolo.run(image) #Run yolo
+        #print(time.time()-start_time)
     #print("Yolo exec time:", time.time()-time_past)
     
     
@@ -561,7 +579,7 @@ while True:
     # Line thickness of 2 px
     thickness = 2
     # Using cv2.putText() method
-    image = cv2.putText(image, 'Traffic Camera ID: ' + str(args.camera_id), org, font, 
+    image = cv2.putText(image, 'Traffic Camera ID: ' + str(args.camera_id) + ' Frame: ' + str(f_idx), org, font, 
 	           fontScale, color, thickness, cv2.LINE_AA)
     
     
@@ -570,7 +588,9 @@ while True:
     #res_lines = res.readlines()
  
  
+
  
+    #print(tracks, f_idx)
     time_past = time.time()
     if res_lines:
         detection_bboxes = np.array([])
@@ -612,10 +632,15 @@ while True:
         
         if detection_bboxes.size > 0:
         
+            #if f_idx >= 22:
+            #    pdb.set_trace()
             if track_alg == 'MOTDT' or track_alg == 'DeepSort':
                 online_targets = tracker.update(np.column_stack((detection_bboxes,detection_confidences)), [pixel_height, pixel_width], (pixel_height,pixel_width), image2)
             else:
-                online_targets = tracker.update(np.column_stack((detection_bboxes,detection_confidences)), [pixel_height, pixel_width], (pixel_height,pixel_width))
+                bbox_stack = np.column_stack((detection_bboxes,detection_confidences))
+                online_targets = tracker.update(bbox_stack, [pixel_height, pixel_width], (pixel_height,pixel_width)) #check order of data error
+                
+            
             
             new_tracks = []
             #pdb.set_trace()
@@ -627,17 +652,29 @@ while True:
                 else:
                     track_id = t.track_id
                     bbox = t.tlbr
+                    input_bbox = t.tlwh_to_tlbr(t.new_tlwh) #For Bytetracker, haven't tested with other ones
                 
      
                 
+                
                 new_tracks.append(track_id)
                 
-                if track_id not in tracks:
-                    class_detected = detection_class_ids[t_idx]
-                else:
-                    class_detected = tracks[track_id][2]
+
                 
-                tracks[track_id] = (bbox,f_idx,class_detected)
+                c_idx = (detection_bboxes[:]==input_bbox).all(1).nonzero()[0][0]
+                
+                class_history = []
+                
+                if track_id not in tracks:
+                    class_detected = detection_class_ids[c_idx]
+                    class_history.append(class_detected)
+                else:
+                    class_history = tracks[track_id][3]
+                    class_history.append(detection_class_ids[c_idx])
+                    class_detected = np.bincount(class_history).argmax()
+                
+                
+                tracks[track_id] = (bbox,f_idx,class_detected,class_history)
                 if track_id not in state:
                     state[track_id] = {}
                     state = state_init(state,track_id,functions,function_metadata)
@@ -748,8 +785,10 @@ while True:
         
     #print(tracks)
     '''
-    #cv2.imshow('image',image)
-    #cv2.waitKey(1)
+    
+    if args.display:
+        cv2.imshow('image',image)
+        cv2.waitKey(1)
 
     for f in functions:
         #Apply functions according to query (right now only two tripwires are checked)
