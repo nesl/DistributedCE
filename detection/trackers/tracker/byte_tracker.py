@@ -187,10 +187,13 @@ class BYTETracker(object):
         dets = bboxes[remain_inds]
         scores_keep = scores[remain_inds]
         scores_second = scores[inds_second]
+        
+        detected_class_keep = detected_class[remain_inds]
+        detected_class_second = detected_class[inds_second]
 
         if len(dets) > 0:
             '''Detections'''
-            detections = [STrack(STrack.tlbr_to_tlwh(tlbr), s, detected_class[z_idx]) for
+            detections = [STrack(STrack.tlbr_to_tlwh(tlbr), s, detected_class_keep[z_idx]) for
                           z_idx,(tlbr, s) in enumerate(zip(dets, scores_keep))]
         else:
             detections = []
@@ -227,8 +230,8 @@ class BYTETracker(object):
         # association the untrack to the low score detections
         if len(dets_second) > 0:
             '''Detections'''
-            detections_second = [STrack(STrack.tlbr_to_tlwh(tlbr), s) for
-                          (tlbr, s) in zip(dets_second, scores_second)]
+            detections_second = [STrack(STrack.tlbr_to_tlwh(tlbr), s, detected_class_second[z_idx]) for
+                          z_idx,(tlbr, s) in enumerate(zip(dets_second, scores_second))]
         else:
             detections_second = []
         r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
