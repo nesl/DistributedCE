@@ -351,10 +351,10 @@ fps = 10
 #Two different tripwires defined as the location with respect to the image width for a given pixel column
 #tripwire1 = 1300
 #tripwire2 = 1750
-functions = ['convoy']
-function_metadata['convoy'] = [[80,0],[200,1]]
-#functions = ['watchbox']
-#function_metadata['watchbox'] = np.array([[213,274,772,772,0], [816,366,1200,725,0], [1294,290,1881,765,0]])
+#functions = ['convoy']
+#function_metadata['convoy'] = [[80,0],[200,1]]
+functions = ['watchbox']
+function_metadata['watchbox'] = np.array([[213,274,772,772,0], [816,366,1200,725,0], [1294,290,1881,765,0]]) #np.array([[20,147,340,520,1],[20,147,340,520,0]]) #np.array([[20,130,290,560,0]]) #np.array([[20,147,340,520,1]]) #np.array([[213,274,772,772,0], [816,366,1200,725,0], [1294,290,1881,765,0]])
 write_to_file_res = []
 
 #new_function = {'watchbox':function_metadata['watchbox']}
@@ -409,8 +409,10 @@ else:
     pixel_height = 600
     imgsz = pixel_width*pixel_height*4
 
+print("Image width: ", pixel_width, " image height: ", pixel_height, " fps: ", fps)
+
 if not args.yolo_synth_output:
-    yolo = Yolo_Exec(weights=args.yolo_weights, imgsz=[pixel_width],conf_thres=0.5, device=args.device, save_conf=True) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
+    yolo = Yolo_Exec(weights=args.yolo_weights, imgsz=[pixel_width],conf_thres=0.1, device=args.device, save_conf=True) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
 
 last_message_num = 0
 
@@ -435,8 +437,8 @@ class ByteTrackArgs:
 track_alg = args.track_alg
 
 if track_alg == 'Byte':
-    new_args = ByteTrackArgs(0.5,0.8, 20)
-    tracker = BYTETracker(new_args, frame_rate=10)
+    new_args = ByteTrackArgs(0.5,0.8, 100)#20)
+    tracker = BYTETracker(new_args, frame_rate=fps)
 elif track_alg == 'Sort':
     tracker = Sort(new_args.track_thresh)
 elif track_alg == 'MOTDT':
@@ -594,9 +596,11 @@ while True:
     #print(tracks, f_idx)
     time_past = time.time()
     if res_lines:
+        #print(res_lines, f_idx)
         detection_bboxes = np.array([])
         detection_class_ids = np.array([])
         detection_confidences = np.array([])
+        detection_extra = np.array([])
         
         for line in res_lines:
         
@@ -622,7 +626,13 @@ while True:
                 detection_bboxes = np.concatenate((detection_bboxes, np.expand_dims(np.array(box_voc),axis=0)),axis=0)
             #detection_bboxes = np.append(detection_bboxes, np.expand_dims(np.array(box_voc),axis=0),axis=0)
             detection_class_ids = np.append(detection_class_ids, int(coordinates_line[0]))
-            detection_confidences = np.append(detection_confidences, float(coordinates_line[-1]))
+            detection_confidences = np.append(detection_confidences, float(coordinates_line[5]))
+            
+            extra_data = np.array([float(cl) for cl in coordinates_line[6:]])
+            if detection_extra.size == 0:
+                detection_extra = np.expand_dims(extra_data,axis=0)
+            else:
+                detection_extra = np.concatenate((detection_extra,np.expand_dims(extra_data,axis=0)),axis=0 )
             
         #print(detection_bboxes)
         #o_tracks = tracker.update(detection_bboxes, detection_confidences, detection_class_ids)
@@ -639,7 +649,9 @@ while True:
                 online_targets = tracker.update(np.column_stack((detection_bboxes,detection_confidences)), [pixel_height, pixel_width], (pixel_height,pixel_width), image2)
             else:
                 bbox_stack = np.column_stack((detection_bboxes,detection_confidences))
-                online_targets = tracker.update(bbox_stack, [pixel_height, pixel_width], (pixel_height,pixel_width), detection_class_ids) #check order of data error
+                #print(bbox_stack, detection_class_ids)
+
+                online_targets = tracker.update(bbox_stack, [pixel_height, pixel_width], (pixel_height,pixel_width), detection_class_ids, detection_extra) #check order of data error
                 
             
             
@@ -654,6 +666,7 @@ while True:
                     track_id = t.track_id
                     bbox = t.tlbr
                     class_history = t.detected_class #For Bytetracker, haven't tested with other ones
+                    detection_extra = t.detected_extra
                 
      
                 
@@ -665,7 +678,7 @@ while True:
                 class_detected = np.bincount(class_history).argmax()
                 
                 
-                tracks[track_id] = (bbox,f_idx,class_detected,class_history)
+                tracks[track_id] = (bbox,f_idx,class_detected,class_history,detection_extra)
                 if track_id not in state:
                     state[track_id] = {}
                     state = state_init(state,track_id,functions,function_metadata)
