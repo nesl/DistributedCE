@@ -197,7 +197,7 @@ if __name__ == "__main__":
         "3.2": "tank_in_middle"
     }
 
-    # IMPORTANT VARIABLES HERE:
+    #### START IMPORTANT CONFIG VARIABLES #####
     ce_mapping = ce3_mapping
     ce_of_interest = "CE3"
     DOMAIN_SHIFT_TYPE = "none"  # Can be "none", "smoke", or "alttank"
@@ -208,7 +208,7 @@ if __name__ == "__main__":
     result_folder = "ce_results/" + ce_result_folder
     ce_file = "../neuroplexLog.csv"
     video_parent_folder = "/media/brianw/1511bdc1-b782-4302-9f3e-f6d90b91f857/home/brianw/SoartechData/videos"
-    # video_parent_folder = "../videos"
+    #### END IMPORTANT CONFIG VARIABLES #####
 
     # This is of the structure   { ce_number : [(take_number, [ae_name, ae_name, etc],[frame_index, frame_index, etc]), ....] }
     parsed_gt = parse_gt_log(ce_file)

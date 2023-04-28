@@ -54,10 +54,19 @@ def execute_main_experiment():
     # This is where we get all of our videos
     # video_parent_folder = "../videos"
     video_parent_folder = "/media/brianw/1511bdc1-b782-4302-9f3e-f6d90b91f857/home/brianw/SoartechData/videos"
+    
     # video_parent_folder = "/media/tuscan-chicken/windows1/data"
     # events_of_interest = [("CE1", 'none', 0, False, False, 1),  ("NCE", 'none', 50, True, True, 1), \
     #                         ("CE2", 'none', 50, True, True, 2), ("ICE2", 'none', 50, True, True, 2), \
     #                         ("CE3", 'none', 50, True, True, 3), ("ICE3", 'none', 50, True, True, 3)]
+    
+    # Events of interest requires 5 parameters:
+    #  The name of the CE (which will be used for naming folders AND looking up in the ground truth log)
+    #  The type of domain shift, which can be "none", "alttank", or "smoke"
+    #  The buffer around the image where we ignore detections (e.g. 10 means anything within 10px of the edge of the image has its detections ignored)
+    #  Truth value for whether we rematch tracks that have been lost (e.g. try to re-assign a track ID when lost)
+    #  Truth value for whether we ignore stationary detections (e.g. do not use YOLOv5 detections when objects are stationary)
+    #  The number of complex event, which is used by the complex event server (e.g. 3 means it evaluates CE3)
     events_of_interest = [("CE3", 'none', 50, True, True, 3)]
     
     
@@ -112,17 +121,7 @@ def execute_main_experiment():
             take = entry
             
             # We only care about take YYY:
-            if take not in [299, 301, 324, 334, 337]:
-                continue
             # if take != 181: # and ev == "ICE1" and dshift_type == "alttank":
-            #     continue
-
-            # Ignore existing takes
-            # if str(take) in os.listdir('/'.join(ev_folder)):
-            #     continue
-            # if ev == "CE1" and int(take) not in [75, 124, 142, 149, 150, 168, 174, 199, 344]:
-            #     continue
-            # if ev == "NCE" and int(take) not in [78, 136, 137, 138, 146, 147, 148, 153, 154, 155, 159, 160, 161, 165, 166, 167, 171, 172, 173, 177, 178, 179, 190, 191, 192, 196, 197, 198]:
             #     continue
 
             video_files, video_ids = get_videos(video_parent_folder, take)

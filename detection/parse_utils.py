@@ -163,6 +163,8 @@ if __name__ == "__main__":
     
     # video_parent_folder = "/media/tuscan-chicken/3CC47BFDC47BB7AA/Users/Brian/Downloads/data"
     video_parent_folder = "/media/brianw/1511bdc1-b782-4302-9f3e-f6d90b91f857/home/brianw/SoartechData/videos/"
+    complex_event = "CE3"
+    domain_shift = "none"
 
     parsed_gt = parse_gt_log(ce_file)
 
@@ -170,10 +172,10 @@ if __name__ == "__main__":
     print(sum([len(x) for x in parsed_gt.values()]))
 
     # Show all takes involving CE1
-    relevant_takes = [x[0] for x in parsed_gt["ICE3"]]
+    relevant_takes = [x[0] for x in parsed_gt[complex_event]]
 
     # Show all takes involving some domain shift or none
-    relevant_takes = get_takes_of_type(video_parent_folder, relevant_takes, "none")
+    relevant_takes = get_takes_of_type(video_parent_folder, relevant_takes, domain_shift)
 
     print(relevant_takes)
     print(len(relevant_takes))
