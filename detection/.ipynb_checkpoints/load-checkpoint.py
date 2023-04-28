@@ -19,16 +19,14 @@ import sys
 import csv
 from tqdm import tqdm
 
-import traceback
-
 import warnings
 warnings.filterwarnings("ignore")
 
 # from torch.multiprocessing import Process, set_start_method
 # set_start_method('spawn', force=True)
 
-# sys.path.append('../network')
-# from data_format import Message, Data, Location
+sys.path.append('../network')
+from data_format import Message, Data, Location
 
 #from motrackers import CentroidTracker, IOUTracker, CentroidKF_Tracker, SORT
 from trackers.tracker.byte_tracker import BYTETracker
@@ -90,10 +88,6 @@ def parse_gt_log(file, take_num):
         
         # Iterate through every row of the CSV
         for row in gt_reader:
-
-            if not row:  # Seems to stop early
-                break
-
             # If this is the first row for this take, then we just track the title, e.g. "Start Scenario CE3DefensivePosition"
             take_number, frame_index, event_name, camera_id = parse_gt_row(row)
             
@@ -102,6 +96,7 @@ def parse_gt_log(file, take_num):
     
     # No more parsing, just return the results
     return relevant_frames
+
 
 def setup_socket():
 
@@ -183,24 +178,10 @@ def cross_tripwire(tracks,state, tripwires):
     return results
     
 #Watchbox function
-def watchbox(tracks,state, watchboxes, min_history = 8):
+def watchbox(tracks,state, watchboxes):
     results = []
 
     for t_key in tracks.keys():
-
-            # Make sure that there are more than x amount of history before recognizing.
-            # print(t_key)
-            # print(tracks[t_key][3])
-            # if len(tracks[t_key][3]) < min_history:
-            #     continue
-            
-
-            # if t_key == 13:
-            #     print(tracks[t_key][2])
-            #     print(tracks[t_key][3])
-            #     print(tracks[t_key][3][-1])
-            #     input()
-                # Also check the most recent history
 
             select = np.where(watchboxes[:,4] == tracks[t_key][2])[0]
             
@@ -212,10 +193,6 @@ def watchbox(tracks,state, watchboxes, min_history = 8):
                 p2 = reference_point[1] - watchboxes[select,1] > 0
                 p3 = reference_point[0] - watchboxes[select,2] < 0
                 p4 = reference_point[1] - watchboxes[select,3] < 0
-
-                # if t_key == 12:
-                #     print("p1 p2 p3 p4" + str((p1, p2, p3, p4)))
-
                 ptotal = p1 & p2 & p3 & p4
 
                 try:
@@ -446,7 +423,7 @@ class SensorEventDetector:
     
     def __init__(self, \
                      video_file, yolo_model, track_alg, camera_id, currentAddr, serverAddr,\
-                    relevant_frames, result_dir, recover_lost_track, buffer_zone, ignore_stationary):
+                    relevant_frames, result_dir):
         
         # Used in tracking
         self.track_alg = track_alg
@@ -465,8 +442,6 @@ class SensorEventDetector:
         debug_filename = '/'.join([args.result_dir, "ae"+str(camera_id)+".txt"])
         self.debug_file = open(debug_filename, "w", buffering=1)
         
-        # Filter classes
-        filter_classes = [0.0, 1.0]
         
         
         # Used to record functions
@@ -511,10 +486,8 @@ class SensorEventDetector:
         #Choose tracking algorithm
         self.tracker = None
         if track_alg == 'Byte':
-            # My buffer size is X minutes at 30fps - if a track is lost for more than X minutes, it is deleted.
-            new_args = ByteTrackArgs(0.5,0.8, 10000000)  # Basically always track same ID
-            self.tracker = BYTETracker(new_args, filter_classes, recover_lost_track, \
-                buffer_zone, ignore_stationary, frame_rate=10)
+            new_args = ByteTrackArgs(0.5,0.8, 20)
+            self.tracker = BYTETracker(new_args, frame_rate=10)
         elif track_alg == 'Sort':
             self.tracker = Sort(new_args.track_thresh)
         elif track_alg == 'MOTDT':
@@ -534,6 +507,51 @@ class SensorEventDetector:
     # Grab an image at an index, and get the yolo results
     def do_object_detection(self, frame_index):
         
+        #     #Non-blocking check for commands from server (primitive events to generate)
+        #     try:
+        #         topic, msg = sock_from_server.recv_multipart(flags=zmq.NOBLOCK)
+        #         print("Receive message")
+        #         print(
+        #             '   Topic: {}, msg:{}'.format(
+        #                 topic.decode('utf-8'), pickle.loads(msg)
+        #             )
+        #         )
+        #         decode_message = True
+
+        #     except:
+        #         pass
+
+        #     if decode_message:
+        #         decode_message = False
+        #         message = pickle.loads(msg)
+        #         print("Message", message)
+        #         if message.message_number > last_message_num: # and message.area == args.camera_id: #We process request only if it corresponds to the area the camera is in
+        #             atomic_event = message.topics
+        #             print("Atomic event", atomic_event)
+        #             if atomic_event not in functions:
+        #                 functions.append(atomic_event)
+        #             print("jere")
+        #             if atomic_event in function_metadata:
+        #                 function_metadata[atomic_event] = np.extend(function_metadata[atomic_event], np.array(message.arguments))
+        #             else:
+        #                 function_metadata[atomic_event] = np.array(message.arguments)
+        #             print("here2", message.arguments)
+        #             new_function = {atomic_event:np.array(message.arguments)}
+        #             try:
+        #                 state = state_add(state,[atomic_event],new_function)
+        #                 print('state', state)
+        #             except:
+        #                 pdb.set_trace()
+        #             last_message_num = message.message_number
+
+        #Open from video file or receive frames from network
+#        if args.video_file:
+
+        # Check if camera opened successfully
+        # if (self.cap.isOpened()== False): 
+        #     print("Stream closed")
+        #     break
+        
         start_read_time = time.time()
         # On our first frame capture, we use set
         image = None
@@ -546,6 +564,38 @@ class SensorEventDetector:
                 ret, image = self.cap.read()
         # Be sure to set the new frame index
         self.current_cap_frame_index = frame_index
+                
+        # print("Cap read time: %f" %(time.time() - start_read_time))
+        
+#         else:
+#             try:
+#                 f_idx = int.from_bytes(recvall(client_socket, 2),'big')
+
+#                 image =recvall(client_socket, imgsz)
+#             except:
+#                 print('Timeout')
+#                 #server_connection, addr = server_socket.accept()
+#                 client_socket = setup_socket()
+#                 connected = False
+#                 while not connected:  
+#                     # attempt to reconnect, otherwise sleep for 2 seconds  
+#                     try:  
+#                         client_socket.connect((address, port))
+#                         connected = True  
+#                         print( "re-connection successful" )  
+#                     except socket.error:  
+#                         sleep( 1 ) 
+#                 #server_connection.settimeout(5)
+#                 continue	
+
+            #imageidx = int.from_bytes(server_connection.recv(2),"big")
+            # image_np = np.frombuffer(image, dtype=np.dtype("uint8"))#.reshape(2560,1440)
+            # image = cv2.cvtColor( image_np.reshape(600,800,4), cv2.COLOR_BGRA2BGR )
+
+        #Required for some tracking algorithms that rely on reid
+        # if track_alg == 'MOTDT' or track_alg == 'DeepSort':
+        #     image2 = image.copy()
+
 
         res_lines = []
 
@@ -554,16 +604,6 @@ class SensorEventDetector:
         res_lines = self.yolo_model.run(image) #Run yolo
         
         return image, res_lines
-
-    # Check if a newly assigned track is allowed
-    def allowed_track_entrance(self, bbox):
-        allowed = False
-
-        if bbox[0] > 0 and bbox[1] > 0 and bbox[2] < 300 and bbox[3] < 1079:
-            allowed = True
-
-        return allowed
-
         
     # Now execute our tracker
     def update_tracker(self, image, res_lines, frame_index):
@@ -571,10 +611,7 @@ class SensorEventDetector:
         detection_bboxes = np.array([])
         detection_class_ids = np.array([])
         detection_confidences = np.array([])
-        detection_extra = np.array([])
 
-       
-        # Iterate through every YOLO result, and add them to detection_bboxes
         for line in res_lines:
 
             coordinates_line = line.split()
@@ -598,40 +635,28 @@ class SensorEventDetector:
                 detection_bboxes = np.concatenate((detection_bboxes, np.expand_dims(np.array(box_voc),axis=0)),axis=0)
             #detection_bboxes = np.append(detection_bboxes, np.expand_dims(np.array(box_voc),axis=0),axis=0)
             detection_class_ids = np.append(detection_class_ids, int(coordinates_line[0]))
-            detection_confidences = np.append(detection_confidences, float(coordinates_line[5]))
-
-            extra_data = np.array([float(cl) for cl in coordinates_line[6:]])
-            if detection_extra.size == 0:
-                detection_extra = np.expand_dims(extra_data,axis=0)
-            else:
-                detection_extra = np.concatenate((detection_extra,np.expand_dims(extra_data,axis=0)),axis=0 )
-
-
+            detection_confidences = np.append(detection_confidences, float(coordinates_line[-1]))
 
         #print(detection_bboxes)
         #o_tracks = tracker.update(detection_bboxes, detection_confidences, detection_class_ids)
         #pdb.set_trace()
 
         text_output = ''
-        issue_pause = False
+
         if detection_bboxes.size > 0:
 
             if self.track_alg == 'MOTDT' or self.track_alg == 'DeepSort':
-                online_targets, issue_pause = \
+                online_targets = \
                     self.tracker.update(np.column_stack((detection_bboxes,detection_confidences)), \
                                 [self.pixel_height, self.pixel_width], (self.pixel_height, self.pixel_width), image2)
             else:
-                bbox_stack = np.column_stack((detection_bboxes, detection_confidences))
-                online_targets, issue_pause = \
-                    self.tracker.update(bbox_stack, \
-                                        [self.pixel_height, self.pixel_width], (self.pixel_height, self.pixel_width),detection_class_ids, image, detection_extra)
+                online_targets = \
+                    self.tracker.update(np.column_stack((detection_bboxes,detection_confidences)), \
+                                        [self.pixel_height, self.pixel_width], (self.pixel_height, self.pixel_width),detection_class_ids)
 
             new_tracks = []
             #pdb.set_trace()
             for t_idx,t in enumerate(online_targets):
-
-                # print(online_targets)
-                # input()
 
                 # if track_alg == 'Sort' or track_alg == 'DeepSort':
                 #     track_id = int(t[4])
@@ -640,39 +665,19 @@ class SensorEventDetector:
                 self.track_id = t.track_id
                 bbox = t.tlbr
                 class_history = t.detected_class
-                detection_extra = t.detected_extra
+
+
+
+
                 new_tracks.append(self.track_id)
-
-
-                
-                
-
-                # Check something - if this track does not already exist and did not emerge
-                #   from one side of the screen, then we ignore this new track
-                # print(bbox)
-                # print(class_history)
-                # print(self.track_id)
-                # if len(class_history) <= 1 and not self.allowed_track_entrance(bbox):
-                #     continue
-                # input()
-
-                # print("Allowed over...")
-                
 
 
                     
 
-                class_detected = t.voted_class
-
-                # if self.track_id == 266:
-                #     print(class_history[-1])
-                #     print(class_detected)
-                #     print()
-                #     input()
+                class_detected = np.bincount(class_history).argmax()
 
 
-                self.tracks[self.track_id] = (bbox,frame_index,class_detected, \
-                    class_history, detection_extra)
+                self.tracks[self.track_id] = (bbox,frame_index,class_detected,class_history)
                 
                 
                 if self.track_id not in self.state:
@@ -708,7 +713,7 @@ class SensorEventDetector:
 #                 video.write(image)
 
         
-        return image, issue_pause
+        return image
     
     
     # Execute the additional functions, such as watchbox recognition, etc.
@@ -791,14 +796,13 @@ class SensorEventDetector:
 
 
         #time_past = time.time()
-        issue_pause = False
         if res_lines:
             # self.debug_output["detections"].append((res_lines, frame_index))
             data_out.append(res_lines)
             
             # Now, update our tracker
             track_start_time = time.time()
-            image, issue_pause = self.update_tracker(image, res_lines, frame_index)
+            image = self.update_tracker(image, res_lines, frame_index)
 #             out_track_data = self.tracks
 #             for tkey in out_track_data.keys():
 #                 out_track_data[tkey] = list(out_track_data[tkey])
@@ -852,12 +856,8 @@ class SensorEventDetector:
                 filepath.append(filename)
                 cv2.imwrite('/'.join(filepath), image)
 
-        cv2.imshow('image'+str(self.camera_id),image)
-        cv2.waitKey(1)
-
-        if issue_pause:
-            print("Pausing")
-            # input()
+        # cv2.imshow('image'+str(self.camera_id),image)
+        # cv2.waitKey(1)
         
         # Write data out to file
         self.debug_file.write(':::'.join([str(x) for x in data_out]) + "\n")
@@ -925,11 +925,6 @@ parser.add_argument('--start_port', type=int, required = True)
 parser.add_argument('--server_port', type=int, required = True)
 parser.add_argument('--current_take', type=int, required = True)
 parser.add_argument('--result_dir', type=str, required = True)
-parser.add_argument('--recover_lost_track', action='store_true')  # If our tracker keeps lost tracks
-parser.add_argument('--no_recover_lost_track', action='store_true')  # If our tracker keeps lost tracks
-parser.add_argument('--buffer_zone', type=int, required = True)
-parser.add_argument('--ignore_stationary', action='store_true')  # If our tracker keeps lost tracks
-parser.add_argument('--no_ignore_stationary', action='store_true')  # If our tracker keeps lost tracks
 args = parser.parse_args()
 
 
@@ -987,14 +982,6 @@ if __name__=='__main__':
     # I suspect the 4th element of this watchbox metadata is for matching classes...
     #  Class 1.0 is the BTR80
 
-        
-        recover_lost_track = False
-        if args.recover_lost_track:
-            recover_lost_track = True
-        ignore_stationary = False
-        if args.ignore_stationary:
-            ignore_stationary = True
-
 
         event_detectors = []
         video_files = args.video_files
@@ -1016,21 +1003,18 @@ if __name__=='__main__':
         ce_server_port = args.server_port
         for v_i, vfile in enumerate(video_files):
 
-            # We only initialize for camera 3
-            # if "cam2" not in vfile: # or "cam2" not in vfile:
-            #     continue
+
 
             # First, initialize the class
             eventDetector = SensorEventDetector(vfile, yolo, args.track_alg, args.camera_ids[v_i], \
                                                 (event_detector_ip, event_detector_port),
-                                                (ce_server_ip, ce_server_port), relevant_frames, args.result_dir, \
-                                                    recover_lost_track, args.buffer_zone, ignore_stationary)
+                                                (ce_server_ip, ce_server_port), relevant_frames, args.result_dir)
             event_detector_port += 1
             event_detectors.append(eventDetector)
 
 
         total_frames = eventDetector.total_frames
-        start_frame = 0 # int(1800*5) # int(1800*4.35)
+        start_frame = 0 # int(1800*9.95) # int(1800*4.35)
         stride = 3  # Speed up our execution - we skip every few frames
 
         # Make sure we have a directory to save some images - basically when events happen 
@@ -1071,10 +1055,9 @@ if __name__=='__main__':
         print("Ended correctly.")
     
     except Exception as e:
-        # exc_type, exc_obj, exc_tb = sys.exc_info()
-        # fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        # print(exc_type, fname, exc_tb.tb_lineno)
-        print(traceback.format_exc())
+        exc_type, exc_obj, exc_tb = sys.exc_info()
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print(exc_type, fname, exc_tb.tb_lineno)
         input()
 
 

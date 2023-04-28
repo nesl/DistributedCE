@@ -3,10 +3,6 @@ camera_id,alias,path_file
 3,1,path1_cam3
 3,2,path2_cam3
 3,3,path3_cam3
-2,0,path0_cam2
-2,1,path1_cam2
-2,2,path2_cam2
-2,3,path3_cam2
 1,0,path0_cam1
 1,1,path1_cam1
 1,2,path2_cam1

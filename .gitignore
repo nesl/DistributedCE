@@ -13,3 +13,8 @@ simulator/reference.png
 simulator/draw_reference.py
 network/new_client.py
 network/draw_reference.py
+soartechDetectorV2.pt
+neuroplexLog.csv
+multiV2.yml
+detection/ce_results/*
+detection/__pycache__

@@ -229,7 +229,6 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
     starting_time = []
     traffic_points = []
     
-    location_range_points = np.array([])
     
     orders = ["reverse" if "reverse" in ic and int(ic["reverse"]) else "normal" for ic in input_config]
     
@@ -335,9 +334,7 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                 #Get number of points based on speed
                 if speed < 0:
                     number_points = abs(int(1/(speed/(t_max-0))*fps))
-                    
                 elif speed == 0: #If the vehicle stops
-                
                     if p_idx < len(change_points)-1:
                         if not type_of_change[p_idx+1] == "time":
                             print("Error: When stopped, you need to specify a time for the next action")
@@ -356,10 +353,7 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                     x_temp = np.full((int(period),), xn[-1])
                     y_temp = np.full((int(period),), yn[-1])
                     
-                    
-                    
-                        
-                    if vehicle_idx < len(input_config) and "turn" in ic["trajectory"][p_idx]: #Only for scenario vehicles
+                    if "turn" in ic["trajectory"][p_idx]:
                         turn_angle = np.deg2rad(ic["trajectory"][p_idx]["turn"])
                     else:
                         turn_angle = rn[-1]
@@ -415,27 +409,10 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                             x_points = np.sort([ic["trajectory"][p_idx+1]["start"][0],ic["trajectory"][p_idx+1]["end"][0]])
                             y_points = np.sort([ic["trajectory"][p_idx+1]["start"][1],ic["trajectory"][p_idx+1]["end"][1]])
 
-                            distance = -1
-                            
-                            while distance < vehicle_separation: #Check vehicles random points are sufficiently separated
 
-                                new_loc = np.random.uniform(low=[x_points[0],y_points[0]], high=[x_points[1],y_points[1]], size=(1,2))
-                                
-                                if location_range_points.size == 0:
-                                    break
-                                    
-                                distance = np.min(np.linalg.norm(new_loc-location_range_points, axis=1))
-
-                                
-                            
+                            new_loc = np.random.uniform(low=[x_points[0],y_points[0]], high=[x_points[1],y_points[1]], size=(1,2))
                             x_location = new_loc[0][0]
                             y_location = new_loc[0][1]
-                            
-                            if location_range_points.size == 0:
-                                location_range_points = np.expand_dims(np.array([x_location,y_location]),0)
-                            else:
-                                location_range_points = np.concatenate((location_range_points,np.array([[x_location,y_location]])),axis=0)
-                            
                         
                         #Get the point that is closer to the location defined by the user
                         for c_idx in range(len(xs)):
@@ -548,7 +525,7 @@ def get_equally_spaced_points(input_config, track_points, fps, episode_len, extr
                 else:
                     reference_vector = np.diff([x_temp,y_temp])
                     
-                r_temp = np.arccos(reference_vector[0]/np.linalg.norm(reference_vector,axis=0))*(-1)
+                r_temp = np.arccos(reference_vector[0]/np.linalg.norm(reference_vector,axis=0))
                 #kernel_size = fps
                 #kernel = np.ones(kernel_size) / kernel_size
                 #r_temp = np.convolve(r_temp, kernel, mode='same') #filter rotation data
@@ -741,10 +718,7 @@ if __name__ == "__main__":
         
         class_info[cam["camera"]] = get_class_info(cam["vehicles"], class_metadata[str(cam["camera"])], desired_classes)
              
-        try:
-            data = get_track_points(cam["vehicles"], args.skip_files, json_points[str(cam["camera"])], desired_tracks)
-        except:
-            pdb.set_trace()
+        data = get_track_points(cam["vehicles"], args.skip_files, json_points[str(cam["camera"])], desired_tracks)
         
         track_points = process_points(data)
             
@@ -797,13 +771,11 @@ if __name__ == "__main__":
                             crop_image = class_info[cam["camera"]][synth_data[cam["camera"]][s_idx][3]]["image"]
                             
                             if rotation:
-                                if "reverse" == synth_data[cam["camera"]][s_idx][6]:
-                                    rotation = -rotation
                                 M = cv2.getRotationMatrix2D((crop_image.shape[1]/2,crop_image.shape[0]/2),-rotation,1)
                                 crop_image = cv2.warpAffine(crop_image,M,(crop_image.shape[1],crop_image.shape[0])) 
 
-                            #if "reverse" == synth_data[cam["camera"]][s_idx][6]:
-                            #    crop_image = cv2.flip(crop_image,1)
+                            if "reverse" == synth_data[cam["camera"]][s_idx][6]:
+                                crop_image = cv2.flip(crop_image,1)
                                 
                             '''
                             if not i < synth_data[cam["camera"]][s_idx][7][0][1]:

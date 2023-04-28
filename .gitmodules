@@ -4,3 +4,6 @@
 [submodule "ComplexEventSimulator"]
 	path = ComplexEventSimulator
 	url = https://github.com/nesl/ComplexEventSimulator.git
+[submodule "LanguageCE"]
+	path = LanguageCE
+	url = https://github.com/nesl/LanguageCE
