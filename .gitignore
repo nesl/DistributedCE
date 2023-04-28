@@ -3,7 +3,6 @@ __pycache__
 bbox_annotation
 camera_img
 venv
-detection/yolo
 *.pt
 network/mininet
 network/openflow
