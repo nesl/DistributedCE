@@ -198,10 +198,10 @@ if __name__ == "__main__":
     }
 
     #### START IMPORTANT CONFIG VARIABLES #####
-    ce_mapping = ce3_mapping
-    ce_of_interest = "CE3"
+    ce_mapping = ce1_mapping
+    ce_of_interest = "CE1"
     DOMAIN_SHIFT_TYPE = "none"  # Can be "none", "smoke", or "alttank"
-    ce_result_folder = "CE3_none_50_True_True"
+    ce_result_folder = "CE1_smoke_50_True_True"
     # result_folder = "/media/brianw/1511bdc1-b782-4302-9f3e-f6d90b91f857/home/brianw/SoartechData/ce_results/" + ce_result_folder
     # result_folder = "/media/brianw/Samsung USB/ce_results/" + ce_result_folder
     # result_folder = "/media/brianw/Elements/code/ce_results/" + ce_result_folder
@@ -221,6 +221,7 @@ if __name__ == "__main__":
     relevant_takes = get_takes_of_type(video_parent_folder, relevant_takes, DOMAIN_SHIFT_TYPE)
     print(relevant_takes)
     chosen_metric = binary_metric
+    asdf
     
     false_alarms = {}  # made up of cam_folder : [event_name, ... ]
     missed_detections = {}  # Made up of cam_folder : [event_name, ...]

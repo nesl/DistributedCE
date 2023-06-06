@@ -67,11 +67,13 @@ def execute_main_experiment():
     #  Truth value for whether we rematch tracks that have been lost (e.g. try to re-assign a track ID when lost)
     #  Truth value for whether we ignore stationary detections (e.g. do not use YOLOv5 detections when objects are stationary)
     #  The number of complex event, which is used by the complex event server (e.g. 3 means it evaluates CE3)
-    events_of_interest = [("CE3", 'none', 50, True, True, 3)]
+    # events_of_interest = [("CE1", 'alttank', 50, True, True, 1), ("CE1", 'smoke', 50, True, True, 1)]
+    events_of_interest = [("CE1", 'smoke', 50, True, True, 1)]
     
     
     event_count = {}
     print([(x,len(parsed_gt[x])) for x in parsed_gt.keys()])
+
 
     
     # Process names of our python programs
