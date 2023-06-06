@@ -371,8 +371,7 @@ if __name__=='__main__':
     gt_files = get_obj_visibility_files(gt_dir)
 
     # Get all offsets for the object visibility files and save to file
-    get_offsets_and_save_to_file(gt_files, "offsets")
-    asdf
+    # get_offsets_and_save_to_file(gt_files, "offsets")
 
     # # Open the pickle file
     # with open("offsets.pkl", "rb") as f:
@@ -383,9 +382,6 @@ if __name__=='__main__':
     for gt_file in gt_files:
 
         current_take = "take_" + str(gt_file[0])
-
-        if gt_file[0] != 205:
-            continue
 
 
         # 205 - fc is 18581 while matched index is 573, so offset of 18008
@@ -402,8 +398,8 @@ if __name__=='__main__':
         gt_filepath =  os.path.join(gt_file[1], gt_file[2])
         gt_items = get_first_X_gt_detections(gt_filepath, num_gt_candidates=-1)  # -1 means get all data
 
-        # apply_gt_and_load_video(vfilepath, gt_items, offset_data[current_take])
-        apply_gt_and_load_video(vfilepath, gt_items, 18008)
+        apply_gt_and_load_video(vfilepath, gt_items, offset_data[current_take])
+        # apply_gt_and_load_video(vfilepath, gt_items, 18008)
 
         
     
