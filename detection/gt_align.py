@@ -374,9 +374,9 @@ if __name__=='__main__':
     # get_offsets_and_save_to_file(gt_files, "offsets")
 
     # # Open the pickle file
-    # with open("offsets.pkl", "rb") as f:
-    #     offset_data = pickle.load(f)
-    #     print(data)
+    with open("offsets.pkl", "rb") as f:
+        offset_data = pickle.load(f)
+        print(data)
 
     # Iterate through each ground truth file and videos
     for gt_file in gt_files:
@@ -391,6 +391,8 @@ if __name__=='__main__':
         # Take camera 1 as an example
 
         files_for_take = os.listdir(gt_file[1])
+
+        # We are only using cam1 for now
         video_file = [x for x in files_for_take if "cam1" in x]
         video_file = video_file[0]
         vfilepath = os.path.join(gt_file[1], video_file)
