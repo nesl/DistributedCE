@@ -376,17 +376,14 @@ if __name__=='__main__':
     # # Open the pickle file
     with open("offsets.pkl", "rb") as f:
         offset_data = pickle.load(f)
-        print(data)
+        print(offset_data)
+
+    # The above file is basically a dict of { video take : offset from frame count }
 
     # Iterate through each ground truth file and videos
     for gt_file in gt_files:
 
         current_take = "take_" + str(gt_file[0])
-
-
-        # 205 - fc is 18581 while matched index is 573, so offset of 18008
-        # 229 - fc is 72569 while matched index is 556, so offset of 72013
-        # 250 - fc is 450590 while matched index is 536, so 450054
 
         # Take camera 1 as an example
 
