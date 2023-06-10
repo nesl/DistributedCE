@@ -119,6 +119,7 @@ def parse_gt_data(gt_data):
         "cam_name": cam_num,
         "obj_label": int(gt_data[6]),
         "xxyy": xxyy,
+        "obj_id": int(gt_data[5])
     }   
 
     return gt_data
@@ -281,7 +282,7 @@ def get_offsets_and_save_to_file(gt_files, save_file_name):
 #   This function returns a dict of:
 #     {
 #         camera_id: {
-#                       corrected_frame_index : [list of (xy,xy,xy,xy,object class)]
+#                       corrected_frame_index : [list of (xy,xy,xy,xy,object class, obj_id)]
 #                    }     
 #     }
 #  The parameter 'fine_tune' is just adding a few frames to the offset to fix
@@ -299,6 +300,7 @@ def initialize_gt_bboxes(gt_items, offset, img_width, img_height, fine_tune=3):
         gt_coordinates[2] += vertical_buffer
         gt_coordinates[3] = (img_height - gt_coordinates[3]) + horizontal_buffer
         gt_coordinates.append(gt_item["obj_label"])
+        gt_coordinates.append(gt_item["obj_id"])
         gt_coordinates_list.append(gt_coordinates)
 
 
@@ -356,6 +358,67 @@ def apply_gt_and_load_video(vfilepath, gt_items, offset):
         cv2.waitKey(1)
 
         current_frame_index += 1
+
+
+#  This is for obtaining ground truth for a given frame
+class gt_source_drone:
+
+    #  For a video file, it should open the ground truth file and load the offsets
+    #  Video file will be something like: home/.../videos/take_186/neuroplex_cam2_take_186_smoke_alttank.mp4
+    def __init__(self, video_file):
+
+        # First, load the offsets data
+        with open("gt_files/offsets.pkl", "rb") as f:
+            self.offset_data = pickle.load(f)
+
+        # Get the current take of the video file
+        gt_parent_folder = video_file.split("/")[:-1]
+        gt_parent_folder = '/'.join(gt_parent_folder)
+        current_take = video_file.split("/")[-2]
+        # Get the offset
+        self.offset = self.offset_data[current_take]
+
+        # Get the object visibility file
+        obj_visibility_file = os.listdir(gt_parent_folder)
+        obj_visibility_file = [x for x in obj_visibility_file if "objectvisibility" in x]
+        gt_filepath = os.path.join(gt_parent_folder, obj_visibility_file[0])
+
+        # Now, get all frame data
+        print("Getting ground truth data")
+        self.gt_items = get_first_X_gt_detections(gt_filepath, num_gt_candidates=-1)
+
+    # Get the camera dict, which looks like:
+    #  {
+    #         camera_id (e.g. cam1): {
+    #                       corrected_frame_index : [list of (xy,xy,xy,xy,object class, object ID)]
+    #                    }     
+    #     }
+    def generate_cam_dict(self, pixel_width, pixel_height):
+        self.cam_dict = initialize_gt_bboxes(self.gt_items, self.offset, pixel_width, pixel_height)
+
+
+    def generate_results_for_frame(self, camera_id, frame_index):
+
+        # Get the data for this frame and camera
+        camera_key = "cam" + str(int(camera_id)+1)
+
+        res_data = None
+        if frame_index in self.cam_dict[camera_key]:
+            res_data = self.cam_dict[camera_key][frame_index]
+            # Looks like:
+            # [ [40, 515, 103, 545, 1, -65020] ] which is [x1, y1, x2, y2, class, obj_id]
+
+        # Should return a list containing strings of:
+        # class_label  x1 y1 x2 y2 object tracking ID )
+        
+        res_lines = []
+        if res_data:
+            for entry in res_data:
+                current_line = [entry[4]] + entry[:4] + [entry[5]]
+                current_line = ' '.join([str(x) for x in current_line])
+                res_lines.append(current_line)
+
+        return res_lines
 
 
 

@@ -19,6 +19,10 @@ import sys
 import csv
 from tqdm import tqdm
 
+
+# Get our ground truth data
+from gt_files.gt_align import gt_source_drone
+
 import traceback
 
 import warnings
@@ -203,6 +207,11 @@ def watchbox(tracks,state, watchboxes, min_history = 8):
                 # Also check the most recent history
 
             select = np.where(watchboxes[:,4] == tracks[t_key][2])[0]
+            # with GT: [40, 515, 103, 545]
+            # without GT: [     74.118       513.8      92.082       523.2]
+            # print(tracks[t_key][0])
+            # print(type(tracks[t_key][0]))
+            # asdf
             
             if select.size > 0:
                 # print(select)
@@ -446,7 +455,8 @@ class SensorEventDetector:
     
     def __init__(self, \
                      video_file, yolo_model, track_alg, camera_id, currentAddr, serverAddr,\
-                    relevant_frames, result_dir, recover_lost_track, buffer_zone, ignore_stationary):
+                    relevant_frames, result_dir, recover_lost_track, \
+                    buffer_zone, ignore_stationary, use_gt):
         
         # Used in tracking
         self.track_alg = track_alg
@@ -454,6 +464,13 @@ class SensorEventDetector:
         self.state = {}
         self.track_id = 0
         self.old_tracks = []
+
+        # Determine if we are using ground truth.  If so, we can ignore parts of the detection
+        #  and tracking.
+        self.use_gt = use_gt
+        self.gt_mapping = {}  #this maps a special ID to our numbers
+        if self.use_gt:
+            self.gt_source = gt_source_drone(video_file)
         
         # Determine relevant frames:
         self.relevant_frames = relevant_frames
@@ -492,6 +509,9 @@ class SensorEventDetector:
             self.pixel_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             self.pixel_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = int(self.cap.get(cv2.CAP_PROP_FPS))
+
+            if self.use_gt:
+                self.gt_source.generate_cam_dict(self.pixel_width, self.pixel_height)
             
             
 
@@ -550,8 +570,10 @@ class SensorEventDetector:
         res_lines = []
 
 
-        # else:
-        res_lines = self.yolo_model.run(image) #Run yolo
+        if self.use_gt:  # Get the ground truth res lines
+            res_lines = self.gt_source.generate_results_for_frame(self.camera_id, frame_index)
+        else:
+            res_lines = self.yolo_model.run(image) #Run yolo
         
         return image, res_lines
 
@@ -573,38 +595,71 @@ class SensorEventDetector:
         detection_confidences = np.array([])
         detection_extra = np.array([])
 
+        # So here's the content of each element of res_lines:
+        #  [ class prediction, x1, y1, x2, y2, objectness score, something, then class scores ]
+
        
         # Iterate through every YOLO result, and add them to detection_bboxes
         for line in res_lines:
+
 
             coordinates_line = line.split()
 
             if int(coordinates_line[0]) > 2: #Only pedestrians
                 continue
 
-#             if args.yolo_synth_output:
+            box_voc = None
+            if self.use_gt:
+                box_voc = coordinates_line[1:5]
+                box_voc = [int(x) for x in box_voc]
+                class_id = int(coordinates_line[0])
+                #  Get the class and object ID
+                # Create our tracks here.
+                obj_id = coordinates_line[5]
+                if obj_id not in self.gt_mapping:
+                    self.gt_mapping[obj_id] = self.track_id
+                    self.tracks[self.track_id] = (np.array(box_voc), frame_index, class_id)
+                    
+                    if self.track_id not in self.state:
+                        self.state[self.track_id] = {}
+                        self.state = state_init(self.state,self.track_id,self.functions,self.function_metadata)
 
-#                 box_voc = (int(float(coordinates_line[1])),int(float(coordinates_line[2])),int(float(coordinates_line[3])),int(float(coordinates_line[4])))
-#             else:
-            box_voc = pbx.convert_bbox((float(coordinates_line[1]),float(coordinates_line[2]),float(coordinates_line[3]),float(coordinates_line[4])), from_type="yolo", to_type="voc", \
-                                        image_size=(self.pixel_width, self.pixel_height))
+                    self.track_id += 1
+
+                else:
+                    current_id = self.gt_mapping[obj_id]
+                    self.tracks[current_id] = (np.array(box_voc), frame_index, class_id)
+
+                    # Now, put text on the image
+                    fontScale = 0.5
+                    color = (255, 153, 255)
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    thickness = 2
+                    image = cv2.putText(image, str(current_id), (box_voc[0],box_voc[1]), font, 
+                                fontScale, color, thickness, cv2.LINE_AA)
+                
+
+            else:    
+                box_voc = pbx.convert_bbox((float(coordinates_line[1]),float(coordinates_line[2]),float(coordinates_line[3]),float(coordinates_line[4])), from_type="yolo", to_type="voc", \
+                                            image_size=(self.pixel_width, self.pixel_height))
+
+                if detection_bboxes.size == 0:
+                    detection_bboxes = np.expand_dims(np.array(box_voc),axis=0)
+                else:
+                    detection_bboxes = np.concatenate((detection_bboxes, np.expand_dims(np.array(box_voc),axis=0)),axis=0)
+                #detection_bboxes = np.append(detection_bboxes, np.expand_dims(np.array(box_voc),axis=0),axis=0)
+                detection_class_ids = np.append(detection_class_ids, int(coordinates_line[0]))
+                detection_confidences = np.append(detection_confidences, float(coordinates_line[5]))
+
+                extra_data = np.array([float(cl) for cl in coordinates_line[6:]])
+                if detection_extra.size == 0:
+                    detection_extra = np.expand_dims(extra_data,axis=0)
+                else:
+                    detection_extra = np.concatenate((detection_extra,np.expand_dims(extra_data,axis=0)),axis=0 )
 
 
+            # Finally, draw the rectangle
             cv2.rectangle(image, (box_voc[0], box_voc[1]), (box_voc[2], box_voc[3]), (0, 0, 255), 1)
-
-            if detection_bboxes.size == 0:
-                detection_bboxes = np.expand_dims(np.array(box_voc),axis=0)
-            else:
-                detection_bboxes = np.concatenate((detection_bboxes, np.expand_dims(np.array(box_voc),axis=0)),axis=0)
-            #detection_bboxes = np.append(detection_bboxes, np.expand_dims(np.array(box_voc),axis=0),axis=0)
-            detection_class_ids = np.append(detection_class_ids, int(coordinates_line[0]))
-            detection_confidences = np.append(detection_confidences, float(coordinates_line[5]))
-
-            extra_data = np.array([float(cl) for cl in coordinates_line[6:]])
-            if detection_extra.size == 0:
-                detection_extra = np.expand_dims(extra_data,axis=0)
-            else:
-                detection_extra = np.concatenate((detection_extra,np.expand_dims(extra_data,axis=0)),axis=0 )
 
 
 
@@ -930,6 +985,8 @@ parser.add_argument('--no_recover_lost_track', action='store_true')  # If our tr
 parser.add_argument('--buffer_zone', type=int, required = True)
 parser.add_argument('--ignore_stationary', action='store_true')  # If our tracker keeps lost tracks
 parser.add_argument('--no_ignore_stationary', action='store_true')  # If our tracker keeps lost tracks
+parser.add_argument('--no_use_gt', action='store_true')
+parser.add_argument('--use_gt', action='store_true')  # If we use the ground truth
 args = parser.parse_args()
 
 
@@ -1024,7 +1081,8 @@ if __name__=='__main__':
             eventDetector = SensorEventDetector(vfile, yolo, args.track_alg, args.camera_ids[v_i], \
                                                 (event_detector_ip, event_detector_port),
                                                 (ce_server_ip, ce_server_port), relevant_frames, args.result_dir, \
-                                                    recover_lost_track, args.buffer_zone, ignore_stationary)
+                                                    recover_lost_track, args.buffer_zone, \
+                                                    ignore_stationary, args.use_gt)
             event_detector_port += 1
             event_detectors.append(eventDetector)
 

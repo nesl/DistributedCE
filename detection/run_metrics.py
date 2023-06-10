@@ -219,9 +219,7 @@ if __name__ == "__main__":
     # Get only the takes relevant to use
     relevant_takes = [x[0] for x in parsed_gt[ce_of_interest]]
     relevant_takes = get_takes_of_type(video_parent_folder, relevant_takes, DOMAIN_SHIFT_TYPE)
-    print(relevant_takes)
     chosen_metric = binary_metric
-    asdf
     
     false_alarms = {}  # made up of cam_folder : [event_name, ... ]
     missed_detections = {}  # Made up of cam_folder : [event_name, ...]

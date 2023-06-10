@@ -7,6 +7,7 @@ import psutil
 from parse_utils import parse_gt_log, get_videos, get_takes_of_type
 
 
+
 def get_pid(name):
     return check_output(["pidof",name])
 
@@ -67,8 +68,11 @@ def execute_main_experiment():
     #  Truth value for whether we rematch tracks that have been lost (e.g. try to re-assign a track ID when lost)
     #  Truth value for whether we ignore stationary detections (e.g. do not use YOLOv5 detections when objects are stationary)
     #  The number of complex event, which is used by the complex event server (e.g. 3 means it evaluates CE3)
+    #  And whether or not we use ground truth annotations for detection/tracking.
     # events_of_interest = [("CE1", 'alttank', 50, True, True, 1), ("CE1", 'smoke', 50, True, True, 1)]
-    events_of_interest = [("CE1", 'smoke', 50, True, True, 1)]
+    events_of_interest = [("CE1", 'smoke', 50, True, True, 1, True)]
+    # Check if we are using ground truth files - if so, only some will have them.
+
     
     
     event_count = {}
@@ -81,6 +85,8 @@ def execute_main_experiment():
     server_program = "python test_ce.py"
     # This is where we store our files
     result_folder = "ce_results"
+
+    
 
     
     
@@ -97,9 +103,10 @@ def execute_main_experiment():
         # Do we only weight detections lower when stationary?
         IGNORE_STATIONARY_DETECTIONS = config[4] 
         CURRENT_CE_EVALUATOR = config[5]  # Change this if you want to evaluate different CEs (e.g. 1 = CE1, 2 = CE2, etc)
+        USING_GT = config[6]
 
         # Added string for our folder - basically the extra config for its name
-        added_folder_names = "_".join([dshift_type, str(IMG_BUFFER_ZONE), str(REMATCH_LOST_TRACKS), str(IGNORE_STATIONARY_DETECTIONS)])
+        added_folder_names = "_".join([dshift_type, str(IMG_BUFFER_ZONE), str(REMATCH_LOST_TRACKS), str(IGNORE_STATIONARY_DETECTIONS), str(USING_GT)])
 
         
         # Add our current ce examples
@@ -113,7 +120,7 @@ def execute_main_experiment():
         # Get the takes for this event
         relevant_takes = [x[0] for x in parsed_gt[ev]]
         # Get the takes for no domain shift
-        relevant_takes = get_takes_of_type(video_parent_folder, relevant_takes, dshift_type)
+        relevant_takes = get_takes_of_type(video_parent_folder, relevant_takes, dshift_type, USING_GT)
         print(relevant_takes)
         print(len(relevant_takes))
 
@@ -123,7 +130,7 @@ def execute_main_experiment():
             take = entry
             
             # We only care about take YYY:
-            # if take != 181: # and ev == "ICE1" and dshift_type == "alttank":
+            # if take != 345: # and ev == "ICE1" and dshift_type == "alttank":
             #     continue
 
             video_files, video_ids = get_videos(video_parent_folder, take)
@@ -161,14 +168,14 @@ def execute_main_experiment():
 
             recover_lost_track = "--recover_lost_track" if REMATCH_LOST_TRACKS else "--no_recover_lost_track"
             ignore_stationary = "--ignore_stationary" if IGNORE_STATIONARY_DETECTIONS else "--no_ignore_stationary"
-
+            use_gt = "--use_gt" if USING_GT else "--no_use_gt"
             
             # Start the script for each camera, sending data to the server
             # gnome-terminal -- 
             camera_command = "gnome-terminal -- bash camera.sh " + str(' '.join(video_files)) + " " +\
                     str(' '.join(video_ids) + " " + str(start_port) + " " + str(server_port)) + " " +\
                          vtake_folder + " " + str(take) + " " + recover_lost_track + " " + str(IMG_BUFFER_ZONE) + \
-                         " " + str(ignore_stationary)
+                         " " + str(ignore_stationary) + " " + str(use_gt)
             command.append(camera_command)
             
             # Run both the server and the camera item at the same time.

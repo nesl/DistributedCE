@@ -1,5 +1,6 @@
 import csv
 import os
+from gt_files.gt_align import get_obj_visibility_files
 
 # Converts a time in seconds to frame index
 def convert_time_to_frame(event_time, fps=30):
@@ -129,28 +130,40 @@ def get_videos(parent_folder, take):
 
 
 # Get takes where a domain shift happens based on keyword
-def get_takes_of_type(video_parent_folder, takes, keyword):
+def get_takes_of_type(video_parent_folder, takes, keyword, using_gt):
 
     relevant_takes = []
+
+    gt_files = get_obj_visibility_files(video_parent_folder)
+    list_of_gt_takes = [x[0] for x  in gt_files]
+
     for take in takes:
         # Get all the video files
         vfiles, v_ids = get_videos(video_parent_folder, take)
 
+        is_relevant = False
+
         # Depending on our keyword, we have different checks
         if keyword == "alttank":
             if any([keyword in x for x in vfiles]):
-                relevant_takes.append(take)
+                is_relevant = True
         elif keyword == "smoke":
             if any([keyword in x for x in vfiles]):
-                relevant_takes.append(take)
+                is_relevant = True
         elif keyword == "snow":
             if any([keyword in x for x in vfiles]):
-                relevant_takes.append(take)
+                is_relevant = True
         else:
             to_check = "take_"+str(take)+".mp4"
             if any([to_check in x for x in vfiles]):
-                relevant_takes.append(take)
-            # relevant_takes.append(take)
+                is_relevant = True
+
+        # If we use ground truth, we are restricted
+        if using_gt and take not in list_of_gt_takes:
+            is_relevant = False
+
+        if is_relevant:
+            relevant_takes.append(take)
 
     return relevant_takes
 
