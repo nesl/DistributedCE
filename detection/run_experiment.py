@@ -70,7 +70,7 @@ def execute_main_experiment():
     #  The number of complex event, which is used by the complex event server (e.g. 3 means it evaluates CE3)
     #  And whether or not we use ground truth annotations for detection/tracking.
     # events_of_interest = [("CE1", 'alttank', 50, True, True, 1), ("CE1", 'smoke', 50, True, True, 1)]
-    events_of_interest = [("CE1", 'smoke', 50, True, True, 1, True)]
+    events_of_interest = [("CE1", 'smoke', 50, True, True, 1, True), ("CE1", 'alttank', 50, True, True, 1, True)]
     # Check if we are using ground truth files - if so, only some will have them.
 
     

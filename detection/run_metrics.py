@@ -170,6 +170,48 @@ def get_missed_detections(missed_detections):
     
     return missed_detections_by_ae, missed_detections_by_ce
 
+# Parse the CE results for a particular take.
+#  Example ce_file: "results/CE1_smoke_50_True_True_True/364/ce_output.txt"
+#  Example ce_result_gt: any dict.  If the dict is empty, you will get only
+#    the detection timestamps.
+def parse_ce_results_for_file(ce_file, ce_result_gt):
+
+    # Parse detection event log
+    previous_event_time_diffs = {} # Entries of event_name : min_frame_diff
+    with open(ce_file, "r") as rfile:
+        # Iterate through every row of the CSV
+        for row in rfile:
+            # Split by :::
+            frame_index = int(row.split(":::")[0])
+            event = eval(row.split(":::")[2])
+            
+            if event[0]:
+
+                event_name = event[0][0]
+                event_name = '_'.join(event_name)
+                event_happened = event[0][3]
+
+                # Check if the event actually happened.
+                #  And check if any events are missing
+                if event_happened:
+                    
+                    # Note - if this already exists in our GT
+                    #  make sure to get the closest version of this event
+                    #  (in cases where the event occurs again)
+                    if event_name in ce_result_gt:
+                        current_diff = abs(ce_result_gt[event_name] - frame_index)
+                        if event_name not in previous_event_time_diffs:
+                            previous_event_time_diffs[event_name] = current_diff
+                            ce_result_det[event_name] = frame_index
+                        elif previous_event_time_diffs[event_name] > current_diff:
+                            previous_event_time_diffs[event_name] = current_diff
+                            ce_result_det[event_name] = frame_index
+                    else:
+                        ce_result_det[event_name] = frame_index
+
+    return ce_result_det, previous_event_time_diffs
+
+
 
 if __name__ == "__main__":
 
@@ -200,8 +242,9 @@ if __name__ == "__main__":
     #### START IMPORTANT CONFIG VARIABLES #####
     ce_mapping = ce1_mapping
     ce_of_interest = "CE1"
-    DOMAIN_SHIFT_TYPE = "none"  # Can be "none", "smoke", or "alttank"
-    ce_result_folder = "CE1_smoke_50_True_True"
+    DOMAIN_SHIFT_TYPE = "smoke"  # Can be "none", "smoke", or "alttank"
+    ce_result_folder = "CE1_smoke_50_True_True_True"
+    using_gt = True
     # result_folder = "/media/brianw/1511bdc1-b782-4302-9f3e-f6d90b91f857/home/brianw/SoartechData/ce_results/" + ce_result_folder
     # result_folder = "/media/brianw/Samsung USB/ce_results/" + ce_result_folder
     # result_folder = "/media/brianw/Elements/code/ce_results/" + ce_result_folder
@@ -212,13 +255,13 @@ if __name__ == "__main__":
 
     # This is of the structure   { ce_number : [(take_number, [ae_name, ae_name, etc],[frame_index, frame_index, etc]), ....] }
     parsed_gt = parse_gt_log(ce_file)
-    camera_folders = os.listdir(result_folder)
+    take_folders = os.listdir(result_folder)
     
     gt_event_logs = parsed_gt[ce_of_interest]
 
     # Get only the takes relevant to use
     relevant_takes = [x[0] for x in parsed_gt[ce_of_interest]]
-    relevant_takes = get_takes_of_type(video_parent_folder, relevant_takes, DOMAIN_SHIFT_TYPE)
+    relevant_takes = get_takes_of_type(video_parent_folder, relevant_takes, DOMAIN_SHIFT_TYPE, using_gt)
     chosen_metric = binary_metric
     
     false_alarms = {}  # made up of cam_folder : [event_name, ... ]
@@ -232,15 +275,15 @@ if __name__ == "__main__":
 
     # Iterate through each camera folder, getting its ce_output
     #  camera_folder is just the folder for our results, it's not the actual video folder
-    for cam_folder in camera_folders:
+    for take_folder in take_folders:
 
-        if int(cam_folder) not in relevant_takes:  # Skip if not relevant
+        if int(take_folder) not in relevant_takes:  # Skip if not relevant
             continue
 
-        print("Parsing for %s" %(cam_folder))
+        print("Parsing for %s" %(take_folder))
 
         # Get the ce file
-        ce_file = '/'.join([result_folder, cam_folder, "ce_output.txt"])
+        ce_file = '/'.join([result_folder, take_folder, "ce_output.txt"])
 
 
         # Open the ce file and parse it it
@@ -250,61 +293,28 @@ if __name__ == "__main__":
         # Next, iterate through the gt_event_logs to fill the results
         #  For this particular take
         for tup in gt_event_logs:
-            if tup[0] == int(cam_folder):  # Match the tuple to the current CE result
+            if tup[0] == int(take_folder):  # Match the tuple to the current CE result
                 for ev_i, ev in enumerate(tup[1]):
                     if ev in ce_mapping.keys():
                         translated_event = ce_mapping[ev]
                         ev_frame_index = tup[2][ev_i]
                         ce_result_gt[translated_event] = ev_frame_index
                         
-
-        # Parse ground truth event log
-        previous_event_time_diffs = {} # Entries of event_name : min_frame_diff
-        with open(ce_file, "r") as rfile:
-            # Iterate through every row of the CSV
-            for row in rfile:
-                # Split by :::
-                frame_index = int(row.split(":::")[0])
-                event = eval(row.split(":::")[2])
-                
-                if event[0]:
-
-                    event_name = event[0][0]
-                    event_name = '_'.join(event_name)
-                    event_happened = event[0][3]
-
-                    # Check if the event actually happened.
-                    #  And check if any events are missing
-                    if event_happened:
-                        
-                        # Note - if this already exists in our GT
-                        #  make sure to get the closest version of this event
-                        #  (in cases where the event occurs again)
-                        if event_name in ce_result_gt:
-                            current_diff = abs(ce_result_gt[event_name] - frame_index)
-                            if event_name not in previous_event_time_diffs:
-                                previous_event_time_diffs[event_name] = current_diff
-                                ce_result_det[event_name] = frame_index
-                            elif previous_event_time_diffs[event_name] > current_diff:
-                                previous_event_time_diffs[event_name] = current_diff
-                                ce_result_det[event_name] = frame_index
-                        else:
-                            ce_result_det[event_name] = frame_index
-                        
-                        
+        # Get results from our detections
+        ce_result_det, previous_event_time_diffs = parse_ce_results_for_file(ce_file, ce_result_gt)
 
 
-        false_alarms[cam_folder] = []
-        missed_detections[cam_folder] = []
-        gt_events[cam_folder] = []
-        matches[cam_folder] = {}
+        false_alarms[take_folder] = []
+        missed_detections[take_folder] = []
+        gt_events[take_folder] = []
+        matches[take_folder] = {}
         # Iterate through each ce result for both det and gt
         for detected_ev in ce_result_det.keys():
             # The atomic event is detected but not in the GT log, so we have a false alarm
             if detected_ev not in ce_result_gt.keys():
-                false_alarms[cam_folder].append(detected_ev)
+                false_alarms[take_folder].append(detected_ev)
             else:  # We have a match - record the time differences here.
-                matches[cam_folder][detected_ev] = time_difference(ce_result_gt[detected_ev], \
+                matches[take_folder][detected_ev] = time_difference(ce_result_gt[detected_ev], \
                     ce_result_det[detected_ev])
 
             if detected_ev not in detected_event_count:
@@ -315,8 +325,8 @@ if __name__ == "__main__":
         for gt_ev in ce_result_gt.keys():
             # If the atomic event is not detected but is in the GT log, we have a miss
             if gt_ev not in ce_result_det.keys():
-                missed_detections[cam_folder].append(gt_ev)
-            gt_events[cam_folder].append(gt_ev)
+                missed_detections[take_folder].append(gt_ev)
+            gt_events[take_folder].append(gt_ev)
 
 
     for x in sorted(missed_detections.keys()):
