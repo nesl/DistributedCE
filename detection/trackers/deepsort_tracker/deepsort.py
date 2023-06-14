@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import cv2
 import os
+import pdb
 
 from .reid_model import Extractor
 from yolox.deepsort_tracker import kalman_filter, linear_assignment, iou_matching
@@ -122,7 +123,7 @@ class Tracker:
         mean, covariance = self.kf.initiate(detection.to_xyah())
         self.tracks.append(Track(
             mean, covariance, self._next_id, class_id, self.n_init, self.max_age,
-            detection.feature))
+            detection.feature, detection.remaining_properties))
         self._next_id += 1
 
 
@@ -182,10 +183,11 @@ class DeepSort(object):
         remain_inds = confidences > self.min_confidence
         bbox_tlwh = bbox_tlwh[remain_inds]
         confidences = confidences[remain_inds]
+        remaining_results = output_results[remain_inds]
 
         # generate detections
         features = self._get_features(bbox_tlwh, ori_img)
-        detections = [Detection(bbox_tlwh[i], conf, features[i]) for i, conf in enumerate(
+        detections = [Detection(bbox_tlwh[i], conf, features[i], remaining_results[i,5:]) for i, conf in enumerate(
             confidences) if conf > self.min_confidence]
         classes = np.zeros((len(detections), ))
 
@@ -199,6 +201,7 @@ class DeepSort(object):
 
         # output bbox identities
         outputs = []
+        extra_outputs = []
         for track in self.tracker.tracks:
             if not track.is_confirmed() or track.time_since_update > 1:
                 continue
@@ -206,10 +209,13 @@ class DeepSort(object):
             x1, y1, x2, y2 = self._tlwh_to_xyxy_noclip(box)
             track_id = track.track_id
             class_id = track.class_id
+            remaining_properties = np.array(track.remaining_properties)
+            extra_outputs.append([np.array(remaining_properties[:,0],dtype=np.int),remaining_properties[:,1:]])
+            
             outputs.append(np.array([x1, y1, x2, y2, track_id, class_id], dtype=np.int))
         if len(outputs) > 0:
             outputs = np.stack(outputs, axis=0)
-        return outputs
+        return outputs,extra_outputs
 
     """
     TODO:

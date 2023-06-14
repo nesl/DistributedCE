@@ -157,8 +157,8 @@ class BYTETracker(object):
         self.frame_id = 0
         self.args = args
         #self.det_thresh = args.track_thresh
-        self.det_thresh = args.track_thresh + 0.1
-        self.buffer_size = int(frame_rate / 30.0 * args.track_buffer)
+        self.det_thresh = args.track_thresh #+ 0.1
+        self.buffer_size = args.track_buffer #int(frame_rate / 30.0 * args.track_buffer)
         self.max_time_lost = self.buffer_size
         self.kalman_filter = KalmanFilter()
 
@@ -181,7 +181,7 @@ class BYTETracker(object):
         bboxes /= scale
 
         remain_inds = scores > self.args.track_thresh
-        inds_low = scores > 0.1
+        inds_low = scores > self.args.low_track_thres #0.1 #This shouldn't be constant
         inds_high = scores < self.args.track_thresh
 
         inds_second = np.logical_and(inds_low, inds_high)
@@ -298,7 +298,7 @@ class BYTETracker(object):
         # get scores of lost tracks
         output_stracks = [track for track in self.tracked_stracks if track.is_activated]
 
-        return output_stracks
+        return output_stracks,self.lost_stracks,self.removed_stracks
 
 
 def joint_stracks(tlista, tlistb):

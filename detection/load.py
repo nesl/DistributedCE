@@ -328,6 +328,50 @@ def get_metadata_matrix(metadata, f_idx):
     
     return inv_matrix, camera_height, far_clip_plane, near_clip_plane
     
+    
+def get_ground_truths(ground_truth_file, previous_ground_truth, f_idx): #If bbox is in first frame, problems
+
+    ground_truth_list = []
+    
+
+
+    if previous_ground_truth:
+        if int(previous_ground_truth[2]) == f_idx:
+            ground_truth_list.append(previous_ground_truth)
+
+            while True:
+                
+                next_ground_truth_tmp = ground_truth_file.readline()
+                
+                if len(next_ground_truth_tmp) == 0:
+                    break
+                    
+                next_ground_truth = next_ground_truth_tmp.strip().split(',')
+            
+                if int(next_ground_truth[2]) == f_idx:
+                    ground_truth_list.append(next_ground_truth)
+                else:
+                    break
+        else:
+            next_ground_truth = previous_ground_truth
+        
+    else:
+        next_ground_truth = ground_truth_file.readline().strip().split(',')
+                
+    return ground_truth_list, next_ground_truth
+    
+def rewind_ground_truths(ground_truth_file, camera_num):
+
+    while True:
+        next_ground_truth_tmp = ground_truth_file.readline()
+            
+        next_ground_truth = next_ground_truth_tmp.strip().split(',')
+        
+        if str(camera_num) in next_ground_truth[3]:
+            break
+            
+    return next_ground_truth
+    
 
 #source = '../../Delivery-2022-12-12/video1/'
 #files = sorted(glob.glob(os.path.join(source, '*.*')))
@@ -353,8 +397,8 @@ fps = 10
 #tripwire2 = 1750
 #functions = ['convoy']
 #function_metadata['convoy'] = [[80,0],[200,1]]
-functions = ['watchbox']
-function_metadata['watchbox'] = np.array([[213,274,772,772,0], [816,366,1200,725,0], [1294,290,1881,765,0]]) #np.array([[20,147,340,520,1],[20,147,340,520,0]]) #np.array([[20,130,290,560,0]]) #np.array([[20,147,340,520,1]]) #np.array([[213,274,772,772,0], [816,366,1200,725,0], [1294,290,1881,765,0]])
+#functions = ['watchbox']
+#function_metadata['watchbox'] = np.array([[213,274,772,772,0], [816,366,1200,725,0], [1294,290,1881,765,0]]) #np.array([[20,147,340,520,1],[20,147,340,520,0]]) #np.array([[20,130,290,560,0]]) #np.array([[20,147,340,520,1]]) #np.array([[213,274,772,772,0], [816,366,1200,725,0], [1294,290,1881,765,0]])
 write_to_file_res = []
 
 #new_function = {'watchbox':function_metadata['watchbox']}
@@ -368,15 +412,22 @@ parser.add_argument('--port_to_server', type=int, help='Port to connect to send 
 parser.add_argument('--address_from_server', type=str, help='Address to connect to receive topic subscriptions')
 parser.add_argument('--port_from_server', type=int, help='Port to connect to receive topic subscriptions')
 parser.add_argument('--camera_id', type=int, help='Camera id')
+parser.add_argument('--take', default=0, type=int, help='Camera id')
 parser.add_argument('--track_alg', type=str, default='Byte', help='Track algorithm: Byte, Sort, DeepSort or MOTDT')
 parser.add_argument('--video-file', type=str, default='', help='Open video file instead of connecting to server')
-parser.add_argument('--yolo-weights', type=str, default='./yolov5s.pt', help="YOLO weights file")
+parser.add_argument('--image-file', type=str, default='', help='Open image file instead of connecting to server')
+parser.add_argument('--yolo-weights', nargs='+', type=str, default='./yolov5s.pt', help="YOLO weights file")
 parser.add_argument('--device', type=str, default='0', help="Device where to run YOLO")
 parser.add_argument('--metadata', type=str, help='Camera metadata file')
 parser.add_argument('--save-tracking-dir', type=str, default='', help='Save tracking results to the directory specified')
+parser.add_argument('--save-raw-yolo-dir', type=str, default='', help='Save raw yolo results to the directory specified')
 parser.add_argument('--create-video', type=str, default='', help='Create video. Specify file name.')
 parser.add_argument('--yolo-synth-output', type=str, default='', help='Provide YOLO files and bypass the model. Specify the directory name.')
 parser.add_argument('--display', action='store_true', help='Display video')
+parser.add_argument('--ground-truth', type=str, default='', help='Provide ground truth csv file')
+parser.add_argument('--start', type=int, default=0, help='Starting frame if using video')
+parser.add_argument('--end', type=int, default=0, help='Ending frame if using video')
+parser.add_argument('--conf-thres', type=float, default=0.1, help='YOLO confidence threshold')
 
 
 args = parser.parse_args()
@@ -388,7 +439,7 @@ address = args.address
 port = args.port
 
 
-
+f_idx = -1
 
 if args.video_file:
     cap = cv2.VideoCapture(args.video_file)
@@ -396,11 +447,19 @@ if args.video_file:
     pixel_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     
+    if args.start:
+        f_idx = args.start-1
+        cap.set(cv2.CAP_PROP_POS_FRAMES, args.start)
+    
     if args.metadata:
         f_metadata = open(args.metadata)
 
         metadata = json.load(f_metadata)
-
+        
+elif args.image_file:
+    image = cv2.imread(args.image_file)
+    pixel_height = image.shape[0]
+    pixel_width = image.shape[1]
 else:
     client_socket = setup_socket()
     client_socket.connect((address, port))
@@ -412,7 +471,8 @@ else:
 print("Image width: ", pixel_width, " image height: ", pixel_height, " fps: ", fps)
 
 if not args.yolo_synth_output:
-    yolo = Yolo_Exec(weights=args.yolo_weights, imgsz=[pixel_width],conf_thres=0.1, device=args.device, save_conf=True) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
+    yolo = Yolo_Exec(weights=args.yolo_weights, imgsz=[pixel_width],conf_thres=args.conf_thres, device=args.device, save_conf=True) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
+    #yolo = Yolo_Exec(weights=args.yolo_weights, imgsz=[pixel_width],conf_thres=0.1, device=args.device, save_conf=True)
 
 last_message_num = 0
 
@@ -425,11 +485,12 @@ decode_message = False
 old_tracks = []
 
 class ByteTrackArgs:
-    def __init__(self, track_thresh, match_thresh, track_buffer):
+    def __init__(self, track_thresh, match_thresh, track_buffer, low_track_thres):
         self.track_thresh = track_thresh
         self.match_thresh = match_thresh
         self.mot20 = False 
         self.track_buffer = track_buffer
+        self.low_track_thres = low_track_thres
 
 
 
@@ -437,26 +498,40 @@ class ByteTrackArgs:
 track_alg = args.track_alg
 
 if track_alg == 'Byte':
-    new_args = ByteTrackArgs(0.5,0.8, 100)#20)
+    new_args = ByteTrackArgs(0.5,0.8, 100, 0.1)#20)
     tracker = BYTETracker(new_args, frame_rate=fps)
 elif track_alg == 'Sort':
     tracker = Sort(new_args.track_thresh)
 elif track_alg == 'MOTDT':
     tracker = OnlineTracker('trackers/pretrained/googlenet_part8_all_xavier_ckpt_56.h5', use_tracking=False)
 elif track_alg == 'DeepSort':
-    tracker = DeepSort('trackers/pretrained/ckpt.t7')
+    tracker = DeepSort('trackers/pretrained/ckpt.t7', max_age=100)
     
 #Create directory for saving tracking results
 if args.save_tracking_dir:
     if not os.path.exists(args.save_tracking_dir):
         os.makedirs(args.save_tracking_dir)
+        
+#Create directory for saving raw yolo results
+if args.save_raw_yolo_dir:
+    if not os.path.exists(args.save_raw_yolo_dir):
+        os.makedirs(args.save_raw_yolo_dir)
 
 #Create video file
 if args.create_video:
     video = cv2.VideoWriter(args.create_video, cv2.VideoWriter_fourcc(*'MJPG'), 30, (pixel_width,pixel_height))
 
     
-f_idx = -1
+
+
+#Ttry to match ground truth annotations with detections made with yolo here
+if args.ground_truth:
+    ground_truth_file = open("take_201/neuroplexLog_201_objectvisibility.csv")
+    ground_truth_file.readline()
+
+    next_ground_truth = rewind_ground_truths(ground_truth_file, args.camera_id)
+
+    ground_truth_correspondence = {}
 
 while True:    
     
@@ -507,14 +582,17 @@ while True:
         if (cap.isOpened()== False): 
             print("Stream closed")
             break
-            
+        
+        if args.end and f_idx == args.end:
+            break
         ret, image = cap.read()
         if not ret:
             print("End of video stream")
             cap.release()
             break
         f_idx += 1
-        
+    elif args.image_file:
+        pass
     else:
         try:
             f_idx = int.from_bytes(recvall(client_socket, 2),'big')
@@ -555,8 +633,11 @@ while True:
     
     res_lines = []
     
+    #You can provide a directory with files that correspond to frames and detections made on those frames, and therefore load those results instead of relying on yolo
     if args.yolo_synth_output:
-        filename = args.yolo_synth_output + '/' + str(args.camera_id) + '/' + str(f_idx) + '.txt'
+        #filename = args.yolo_synth_output + '/' + str(args.camera_id) + '/' + str(f_idx) + '.txt'
+        filename = args.yolo_synth_output + '/' + str(args.take) + "_" + str(args.camera_id) + "_" + str(f_idx) + '.txt'
+        #filename = args.yolo_synth_output + '/' + str(f_idx) + '.txt'
         
         if os.path.exists(filename):
             yolo_out = open(filename).readlines()
@@ -565,6 +646,8 @@ while True:
         
     else:
         #start_time = time.time()
+        #if f_idx == 2077:
+        #    pdb.set_trace()
         res_lines = yolo.run(image) #Run yolo
         #print(time.time()-start_time)
     #print("Yolo exec time:", time.time()-time_past)
@@ -591,8 +674,35 @@ while True:
     #res_lines = res.readlines()
  
  
-
- 
+    if args.ground_truth:
+        if str(args.camera_id) not in next_ground_truth[3]:
+            ground_truths = []
+            break #End when we don't have more ground truths to evaluate
+        else:
+            ground_truths, next_ground_truth = get_ground_truths(ground_truth_file, next_ground_truth, f_idx)
+            
+        if ground_truths:
+            iou_score = 0
+            max_index = -1
+            g_bboxes = []
+            g_obj_ids = []
+            for g_idx,g_bbox in enumerate(ground_truths):
+                g_bboxes.append([float(g_bbox[11].replace('(','')),pixel_height-float(g_bbox[12].replace(')','')),float(g_bbox[9].replace('(','')),pixel_height-float(g_bbox[10].replace(')',''))])
+                g_obj_ids.append(g_bbox[5])
+                
+                
+                if g_bbox[5] not in ground_truth_correspondence:
+                    ground_truth_correspondence[g_bbox[5]] = {"results":[],"frames":[]}
+                ground_truth_correspondence[g_bbox[5]]["results"].append([-1]*3)
+                ground_truth_correspondence[g_bbox[5]]["frames"].append(f_idx)
+                    
+                    
+            g_bboxes = torch.as_tensor(g_bboxes)
+            
+            
+            
+            #ground_truth_correspondence = [[-1]*3]*len(ground_truths)
+        
     #print(tracks, f_idx)
     time_past = time.time()
     if res_lines:
@@ -602,23 +712,39 @@ while True:
         detection_confidences = np.array([])
         detection_extra = np.array([])
         
+        text_output = ''
+        
+        #Every yolo detection is processed here, each line is a detection
         for line in res_lines:
+        
+            if args.save_raw_yolo_dir: #To save the raw yolo detection into files
+
+                splitted_line = line.split()
+                raw_line = ' '.join(splitted_line[:5]) + ' ' + splitted_line[6] + ' ' + str(max(map(float,splitted_line[7:]))) + '\n'
+                text_output += raw_line
         
             coordinates_line = line.split()
 
-            if int(coordinates_line[0]) > 2: #Only pedestrians
-                continue
+            #if int(coordinates_line[0]) > 2: #Only pedestrians
+            #    continue
             
-            if args.yolo_synth_output:
+            #if args.yolo_synth_output:
 
-                box_voc = (int(float(coordinates_line[1])),int(float(coordinates_line[2])),int(float(coordinates_line[3])),int(float(coordinates_line[4])))
-            else:
+            #    box_voc = (int(float(coordinates_line[1])),int(float(coordinates_line[2])),int(float(coordinates_line[3])),int(float(coordinates_line[4])))
+            #else:
+            
+            try: #Convert yolo bbox format to voc
                 box_voc = pbx.convert_bbox((float(coordinates_line[1]),float(coordinates_line[2]),float(coordinates_line[3]),float(coordinates_line[4])), from_type="yolo", to_type="voc", image_size=(pixel_width,pixel_height))
+            except:
+                print("Error dimensions")
+                continue
                
             
             cv2.rectangle(image, (box_voc[0], box_voc[1]), (box_voc[2], box_voc[3]), (0, 0, 255), 1)
             
             
+            if args.yolo_synth_output:
+                continue
             
             if detection_bboxes.size == 0:
                 detection_bboxes = np.expand_dims(np.array(box_voc),axis=0)
@@ -628,12 +754,51 @@ while True:
             detection_class_ids = np.append(detection_class_ids, int(coordinates_line[0]))
             detection_confidences = np.append(detection_confidences, float(coordinates_line[5]))
             
+            #Extra data is the distribution of class probabilities
             extra_data = np.array([float(cl) for cl in coordinates_line[6:]])
             if detection_extra.size == 0:
                 detection_extra = np.expand_dims(extra_data,axis=0)
             else:
                 detection_extra = np.concatenate((detection_extra,np.expand_dims(extra_data,axis=0)),axis=0 )
-            
+                
+            if args.ground_truth:
+                if ground_truths:
+
+                    box_voc_tensor = torch.as_tensor([box_voc])
+      
+                    iou = ops.box_iou(g_bboxes, box_voc_tensor)
+                    iou_max = torch.max(iou,dim=0)
+                    iou = iou_max[0][0]
+                    box_idx = iou_max[1][0]
+                    
+                    #if f_idx == 4534:
+                    #    pdb.set_trace()
+
+                    #pdb.set_trace()
+                    if iou > 0.2:
+                    
+                        #if g_obj_ids[box_idx] == ' -900348' and f_idx == 2058:
+                        #    pdb.set_trace()
+
+                        
+
+                        if int(coordinates_line[0]) == int(ground_truths[box_idx][6]):
+                            ground_truth_correspondence[g_obj_ids[box_idx]]["results"][-1] = [1, -1, -1]
+                        else:
+
+                            if ground_truth_correspondence[g_obj_ids[box_idx]]["results"][-1][0] != 1:
+                                ground_truth_correspondence[g_obj_ids[box_idx]]["results"][-1][0] = 0
+                                ground_truth_correspondence[g_obj_ids[box_idx]]["results"][-1][1] = int(coordinates_line[0])
+                                ground_truth_correspondence[g_obj_ids[box_idx]]["results"][-1][2] = int(np.where(np.flip(np.argsort(extra_data[1:])) == int(ground_truths[box_idx][6]))[0][0])
+                            
+                                if ground_truth_correspondence[g_obj_ids[box_idx]]["results"][-1][2] == 0:
+                                    pdb.set_trace()
+                                
+                            
+        if args.save_raw_yolo_dir:
+             f = open(args.save_raw_yolo_dir + '/' + str(f_idx) + '.txt', "w")
+             f.write(text_output)
+             f.close()    
         #print(detection_bboxes)
         #o_tracks = tracker.update(detection_bboxes, detection_confidences, detection_class_ids)
         #pdb.set_trace()
@@ -641,27 +806,29 @@ while True:
         
         text_output = ''
         
-        if detection_bboxes.size > 0:
+        if detection_bboxes.size > 0: #If we got bounding boxes for the current frame let's associate them with tracks
         
-            #if f_idx >= 22:
-            #    pdb.set_trace()
-            if track_alg == 'MOTDT' or track_alg == 'DeepSort':
-                online_targets = tracker.update(np.column_stack((detection_bboxes,detection_confidences)), [pixel_height, pixel_width], (pixel_height,pixel_width), image2)
-            else:
+            #Choose the tracking algorithm           
+            if track_alg == 'MOTDT' or track_alg == 'DeepSort': #Only use DeepSort
+                online_targets,extra_outputs = tracker.update(np.column_stack((detection_bboxes,detection_confidences, detection_class_ids, detection_extra)), [pixel_height, pixel_width], (pixel_height,pixel_width), image2)
+            else: #Only use ByteTracker
                 bbox_stack = np.column_stack((detection_bboxes,detection_confidences))
                 #print(bbox_stack, detection_class_ids)
 
-                online_targets = tracker.update(bbox_stack, [pixel_height, pixel_width], (pixel_height,pixel_width), detection_class_ids, detection_extra) #check order of data error
+                online_targets,_,_ = tracker.update(bbox_stack, [pixel_height, pixel_width], (pixel_height,pixel_width), detection_class_ids, detection_extra) #check order of data error
                 
             
             
             new_tracks = []
             #pdb.set_trace()
-            for t_idx,t in enumerate(online_targets):
+            for t_idx,t in enumerate(online_targets): #Get the resultant tracks
                 
                 if track_alg == 'Sort' or track_alg == 'DeepSort':
                     track_id = int(t[4])
                     bbox = t[:4]
+                    class_history = extra_outputs[t_idx][0]
+                    class_extra = extra_outputs[t_idx][1]
+                    #pdb.set_trace()
                 else:
                     track_id = t.track_id
                     bbox = t.tlbr
@@ -690,7 +857,7 @@ while True:
                                fontScale, color, thickness, cv2.LINE_AA)
                                
                 if args.save_tracking_dir:
-                    text_output += "%f,%f,%f,%f,%d,%d\n" % (*bbox,track_id, class_detected)
+                    text_output += "%f,%f,%f,%f,%d,%d\n" % (*bbox,track_id, class_history[-1]) #class_detected)
                 
             
             if set(new_tracks) != set(old_tracks):
@@ -790,11 +957,18 @@ while True:
     #print(tracks)
     '''
     
+
+    
     if args.display:
         cv2.imshow('image',image)
+        
+        if args.image_file:
+            cv2.waitKey(10000)
+            break
+        
         cv2.waitKey(1)
 
-    for f in functions:
+    for f in functions: #This is to evaluate different functions of interest over the tracks
         #Apply functions according to query (right now only two tripwires are checked)
         res,state = eval(f+"(tracks,state,function_metadata['" + f +"'])")
 
@@ -839,10 +1013,61 @@ while True:
     print(world_coordinates)
     pdb.set_trace()
     """
+    
+    
 
 
 #ce_json = open("complex_results.json","w")
 #json.dump(write_to_file_res,ce_json)
 
+if args.ground_truth:
+
+    error_results = {}
+
+    for g_key in ground_truth_correspondence.keys():
+        results = np.array(ground_truth_correspondence[g_key]["results"])
+        num_results = results.shape[0]
+        accuracy_object = len(np.where(results[:,0] == 1)[0])/num_results
+        
+        error_results[g_key] = {}
+        
+        print("accuracy for ", g_key, " ", accuracy_object)
+        
+        error_results[g_key]["accuracy"] = float(accuracy_object)
+        
+        values,counts = np.unique(results[:,1], return_counts=True)
+        
+        c_indices = np.where(values > -1)[0]
+        
+        total_missc = np.sum(counts[c_indices])
+
+        missclass_dict = {int(values[c_idx]):float(counts[c_idx]/total_missc) for c_idx in c_indices}
+        
+        print("missclassification for ", g_key, " ", missclass_dict)
+        
+        error_results[g_key]["missclass"] = missclass_dict
+        
+        values,counts = np.unique(results[:,2], return_counts=True)
+        c_indices = np.where(values > -1)[0]
+        total_misrank = np.sum(counts[c_indices])
+        
+        missrank_dict = {int(values[c_idx]+1):float(counts[c_idx]/total_misrank) for c_idx in c_indices}
+        
+        print("missrank for ", g_key, " ", missrank_dict)
+        
+        error_results[g_key]["missrank"] = missrank_dict
+        
+        print(ground_truth_correspondence[g_key])
+        
+        error_results[g_key]["data"] = ground_truth_correspondence[g_key]
+
+
+    with open(args.video_file[:-4] + "_error.json", "w") as outfile:
+        try:
+            json.dump(error_results, outfile)
+        except:
+            pdb.set_trace()
+    
+    
 if args.create_video:
     video.release()
