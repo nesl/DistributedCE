@@ -18,3 +18,5 @@ neuroplexLog.csv
 multiV2.yml
 detection/ce_results/*
 detection/__pycache__
+*.engine
+*.mp4

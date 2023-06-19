@@ -1,27 +1,33 @@
-import json
-import pdb
+# import json
+# import pdb
 import numpy as np
-from torchvision import ops
-import torch
+# from torchvision import ops
+# import torch
 import cv2
-from yolov5.modified_detect_simple import Yolo_Exec
+# from yolov5.modified_detect_simple import Yolo_Exec
 import glob
 import os
 import socket
+from socket import SHUT_RDWR
 import argparse
 import pybboxes as pbx
 from time import sleep
 
 import pickle
-import zmq
+# import zmq
 import time
 import sys
 import csv
 from tqdm import tqdm
+import torch
+import torchvision
+
+from yolov5_core import Yolov5 as Yolov5Trt
+from vidsz.opencv import Reader, Writer
 
 
 # Get our ground truth data
-from gt_files.gt_align import gt_source_drone
+# from gt_files.gt_align import gt_source_drone
 
 import traceback
 
@@ -35,12 +41,12 @@ warnings.filterwarnings("ignore")
 # from data_format import Message, Data, Location
 
 #from motrackers import CentroidTracker, IOUTracker, CentroidKF_Tracker, SORT
-from trackers.tracker.byte_tracker import BYTETracker
-from trackers.sort_tracker.sort import Sort
-from trackers.motdt_tracker.motdt_tracker import OnlineTracker
-from trackers.deepsort_tracker.deepsort import DeepSort
+from byte_tracker.byte_tracker import BYTETracker
+# from trackers.sort_tracker.sort import Sort
+# from trackers.motdt_tracker.motdt_tracker import OnlineTracker
+# from trackers.deepsort_tracker.deepsort import DeepSort
 
-from sklearn.cluster import AgglomerativeClustering
+# from sklearn.cluster import AgglomerativeClustering
 
 def ScreenToClipSpace(screenPos,pixelWidth,pixelHeight,farClipPlane, nearClipPlane):
 
@@ -60,6 +66,184 @@ def convert_time_to_frame(event_time, fps=30):
     frame_index = int(event_time * fps)
     return frame_index
 
+# Taken from yolov5/utils/general.py
+def xywh2xyxy(x):
+    # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
+    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y[..., 0] = x[..., 0] - x[..., 2] / 2  # top left x
+    y[..., 1] = x[..., 1] - x[..., 3] / 2  # top left y
+    y[..., 2] = x[..., 0] + x[..., 2] / 2  # bottom right x
+    y[..., 3] = x[..., 1] + x[..., 3] / 2  # bottom right y
+    return y
+
+def xyxy2xywh(x):
+    # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right
+    y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
+    y[..., 0] = (x[..., 0] + x[..., 2]) / 2  # x center
+    y[..., 1] = (x[..., 1] + x[..., 3]) / 2  # y center
+    y[..., 2] = x[..., 2] - x[..., 0]  # width
+    y[..., 3] = x[..., 3] - x[..., 1]  # height
+    return y
+
+def clip_boxes(boxes, shape):
+    # Clip boxes (xyxy) to image shape (height, width)
+    if isinstance(boxes, torch.Tensor):  # faster individually
+        boxes[..., 0].clamp_(0, shape[1])  # x1
+        boxes[..., 1].clamp_(0, shape[0])  # y1
+        boxes[..., 2].clamp_(0, shape[1])  # x2
+        boxes[..., 3].clamp_(0, shape[0])  # y2
+    else:  # np.array (faster grouped)
+        boxes[..., [0, 2]] = boxes[..., [0, 2]].clip(0, shape[1])  # x1, x2
+        boxes[..., [1, 3]] = boxes[..., [1, 3]].clip(0, shape[0])  # y1, y2
+
+
+def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
+    # Rescale boxes (xyxy) from img1_shape to img0_shape
+    if ratio_pad is None:  # calculate from img0_shape
+        gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
+        pad = (img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2  # wh padding
+    else:
+        gain = ratio_pad[0][0]
+        pad = ratio_pad[1]
+
+    boxes[..., [0, 2]] -= pad[0]  # x padding
+    boxes[..., [1, 3]] -= pad[1]  # y padding
+    boxes[..., :4] /= gain
+    clip_boxes(boxes, img0_shape)
+    return boxes
+
+
+
+def non_max_suppression(
+        prediction,
+        conf_thres=0.25,
+        iou_thres=0.45,
+        classes=None,
+        agnostic=False,
+        multi_label=False,
+        labels=(),
+        max_det=300,
+        nm=0,  # number of masks
+):
+    """Non-Maximum Suppression (NMS) on inference results to reject overlapping detections
+
+    Returns:
+         list of detections, on (n,6) tensor per image [xyxy, conf, cls]
+    """
+
+    # Checks
+    assert 0 <= conf_thres <= 1, f'Invalid Confidence threshold {conf_thres}, valid values are between 0.0 and 1.0'
+    assert 0 <= iou_thres <= 1, f'Invalid IoU {iou_thres}, valid values are between 0.0 and 1.0'
+    if isinstance(prediction, (list, tuple)):  # YOLOv5 model in validation model, output = (inference_out, loss_out)
+        prediction = prediction[0]  # select only inference output
+
+    # Convert prediction to tensor
+    prediction = np.expand_dims(prediction, axis=0)
+    prediction = torch.from_numpy(prediction)
+
+    # device = prediction.device
+    device = None
+    # mps = 'mps' in device.type  # Apple MPS
+    # if mps:  # MPS not fully supported yet, convert tensors to CPU before NMS
+    #     prediction = prediction.cpu()
+    bs = prediction.shape[0]  # batch size
+    nc = prediction.shape[1] - nm - 5  # number of classes
+    xc = prediction[..., 4] > conf_thres  # candidates
+
+    # Settings
+    # min_wh = 2  # (pixels) minimum box width and height
+    max_wh = 7680  # (pixels) maximum box width and height
+    max_nms = 30000  # maximum number of boxes into torchvision.ops.nms()
+    time_limit = 0.5 + 0.05 * bs  # seconds to quit after
+    redundant = True  # require redundant detections
+    multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
+    merge = False  # use merge-NMS
+
+    t = time.time()
+    mi = 5 + nc  # mask start index
+    output = [torch.zeros((0, 6 + nm), device=device)] * bs
+    for xi, x in enumerate(prediction):  # image index, image inference
+        # Apply constraints
+        # x[((x[..., 2:4] < min_wh) | (x[..., 2:4] > max_wh)).any(1), 4] = 0  # width-height
+        x = x[xc[xi]]  # confidence
+
+        # Cat apriori labels if autolabelling
+        if labels and len(labels[xi]):
+            lb = labels[xi]
+            v = torch.zeros((len(lb), nc + nm + 5), device=x.device)
+            v[:, :4] = lb[:, 1:5]  # box
+            v[:, 4] = 1.0  # conf
+            v[range(len(lb)), lb[:, 0].long() + 5] = 1.0  # cls
+            x = torch.cat((x, v), 0)
+
+        # If none remain process next image
+        if not x.shape[0]:
+            continue
+
+        # Compute conf
+        class_confidences = x[:, 5:]# .detach().clone()
+        object_confidence = x[:,4]# .detach().clone()
+        x[:, 5:] *= x[:, 4:5]  # conf = obj_conf * cls_conf
+
+        # Box/Mask
+        box = xywh2xyxy(x[:, :4])  # center_x, center_y, width, height) to (x1, y1, x2, y2)
+        mask = x[:, mi:]  # zero columns if no masks
+
+        # Detections matrix nx6 (xyxy, conf, cls)
+        if multi_label:
+            i, j = (x[:, 5:mi] > conf_thres).nonzero(as_tuple=False).T
+            x = torch.cat((box[i], x[i, 5 + j, None], j[:, None].float(), mask[i]), 1)
+        else:  # best class only
+            conf, j = x[:, 5:mi].max(1, keepdim=True)
+            x = torch.cat((box, conf, j.float(), mask), 1)[conf.view(-1) > conf_thres]
+            class_confidences = class_confidences[conf.view(-1) > conf_thres]
+            object_confidence = object_confidence[conf.view(-1) > conf_thres]
+
+        # Filter by class
+        if classes is not None:
+            x = x[(x[:, 5:6] == torch.tensor(classes, device=x.device)).any(1)]
+
+        # Apply finite constraint
+        # if not torch.isfinite(x).all():
+        #     x = x[torch.isfinite(x).all(1)]
+
+        # Check shape
+        n = x.shape[0]  # number of boxes
+        if not n:  # no boxes
+            continue
+
+        class_confidences = class_confidences[x[:, 4].argsort(descending=True)[:max_nms]]
+        object_confidence = object_confidence[x[:, 4].argsort(descending=True)[:max_nms]]
+        x = x[x[:, 4].argsort(descending=True)[:max_nms]]  # sort by confidence and remove excess boxes
+
+        # Batched NMS
+        c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
+        boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
+        i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
+        i = i[:max_det]  # limit detections
+        if merge and (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
+            # update boxes as boxes(i,4) = weights(i,n) * boxes(n,4)
+            iou = box_iou(boxes[i], boxes) > iou_thres  # iou matrix
+            weights = iou * scores[None]  # box weights
+            x[i, :4] = torch.mm(weights, x[:, :4]).float() / weights.sum(1, keepdim=True)  # merged boxes
+            if redundant:
+                i = i[iou.sum(1) > 1]  # require redundancy
+
+        output[xi] = x[i]
+        
+        output[xi] = torch.cat((output[xi],object_confidence[i].unsqueeze(1),class_confidences[i]),dim=1)
+
+        
+
+
+
+        # if mps:
+        #     output[xi] = output[xi].to(device)
+        # if (time.time() - t) > time_limit:
+        #     LOGGER.warning(f'WARNING ⚠️ NMS time limit {time_limit:.3f}s exceeded')
+        #     break  # time limit exceeded
+
+    return output
 
 # Parse a row of the CSV file
 #  We are only interested in a few rows - so filter them here.
@@ -118,27 +302,27 @@ def setup_socket():
     return client_socket
 
 
-def setup_zmq(ip_from_server,ip_to_server,port_from_server,port_to_server):
+# def setup_zmq(ip_from_server,ip_to_server,port_from_server,port_to_server):
 
-    ctx = zmq.Context()
+#     ctx = zmq.Context()
 
-    #server_ip = zmq_address  # "10.0.0.10" #"10.0.0.10" #"192.168.0.133"#"192.168.0.100" #"192.168.0.133" #"127.0.0.1"
+#     #server_ip = zmq_address  # "10.0.0.10" #"10.0.0.10" #"192.168.0.133"#"192.168.0.100" #"192.168.0.133" #"127.0.0.1"
 
-    #port_from_server = "5561"
-    #port_to_server = "5560"
-    address_from_server = "tcp://%s:%s" % (ip_from_server, port_from_server)
-    address_to_server = "tcp://%s:%s" % (ip_to_server, port_to_server)
+#     #port_from_server = "5561"
+#     #port_to_server = "5560"
+#     address_from_server = "tcp://%s:%s" % (ip_from_server, port_from_server)
+#     address_to_server = "tcp://%s:%s" % (ip_to_server, port_to_server)
 
 
-    sock_from_server = ctx.socket(zmq.SUB)
-    sock_from_server.connect(address_from_server)
-    print("address_from_server:", address_from_server)
-    sock_to_server = ctx.socket(zmq.PUB)
-    sock_to_server.connect(address_to_server)
-    sock_from_server.setsockopt(zmq.SUBSCRIBE, b'')
-    print("address_to_server: ", address_to_server)
+#     sock_from_server = ctx.socket(zmq.SUB)
+#     sock_from_server.connect(address_from_server)
+#     print("address_from_server:", address_from_server)
+#     sock_to_server = ctx.socket(zmq.PUB)
+#     sock_to_server.connect(address_to_server)
+#     sock_from_server.setsockopt(zmq.SUBSCRIBE, b'')
+#     print("address_to_server: ", address_to_server)
     
-    return sock_from_server, sock_to_server
+#     return sock_from_server, sock_to_server
 
 
 
@@ -230,7 +414,7 @@ def watchbox(tracks,state, watchboxes, min_history = 8):
                 try:
                     results_tmp = np.logical_xor(ptotal,state[t_key]['watchbox']['results'][select])
                 except:
-                    pdb.set_trace()
+                    # pdb.set_trace()
                     print("Error")
                 #print(ptotal, state[t_key]['watchbox']['results'], results_tmp, t_key)
                 results_tmp = np.nonzero(results_tmp)[0]
@@ -292,7 +476,7 @@ def convoy(tracks, state, groups):
         if len(reference_points) > min_number_vehicles and len(rp_idxs) > min_number_vehicles:
             
             
-            clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=g[0], linkage='single').fit_predict(reference_points[rp_idxs,:2])
+            clustering = None # AgglomerativeClustering(n_clusters=None, distance_threshold=g[0], linkage='single').fit_predict(reference_points[rp_idxs,:2])
 
             labels,label_counts = np.unique(clustering, return_counts=True)
             #pdb.set_trace()
@@ -414,7 +598,8 @@ class SensorEventDetector:
         # Turn the message into bytes
         message = str(message).encode()
         print("sending to " + str(serverAddr))
-        self.sock.sendto(message, serverAddr)
+        # self.sock.sendto(message, serverAddr)
+        self.sock.send(message)
         
         
     
@@ -424,19 +609,51 @@ class SensorEventDetector:
     def handshake(self, currentAddr, serverAddr):
         
         # First, initialize our socket
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(currentAddr)
-        print("Listening socket on " + str(currentAddr))
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        
+        # self.sock.bind(currentAddr)
+        # print("Listening socket on " + str(currentAddr))
+        self.sock.connect(serverAddr)
         
         # Next, send data to the server address
         camera_message = "camera_id:"+str(self.camera_id)
         self.sendMessage(camera_message, serverAddr)
         
+
+        # Now, receive video data
+        print("Receiving video data...")
+        video_filepath = "../video_to_run.mp4"
+        video_file = open(video_filepath, "wb")
+        while True:
+            data = self.sock.recv(1024)
+            if data == b"done":
+                break
+            video_file.write(data)
+
+        print("Finished receiving...")
+        # Now, send an ack back that you have received, loaded the video, and did warmup
+        self.reader = Reader(video_filepath)
+        self.pixel_width, self.pixel_height = \
+        self.reader.read().shape[1], self.reader.read().shape[0]
+
+        #  Do a warmup for the model
+        print("Starting Warmup")
+        warmup = np.random.randint(0, 255, self.reader.read().shape).astype("float")
+        for i in tqdm(range(10)):
+            self.yolo_model(warmup)
+
+
+        # Send 'ready'
+        print("Sending Ready")
+        self.sendMessage("ready", serverAddr)
+
+        
         # Next, temporarily listen for data
-        data, addr = self.sock.recvfrom(512)
+        data = self.sock.recv(1024)
         
         # Set our watchbox data
         watchbox_data = data.decode()
+        print(watchbox_data)
         watchbox_data = watchbox_data.split("watchboxes:")[1]
         watchbox_data = eval(watchbox_data)
         print("received watchbox data: " + str(watchbox_data))
@@ -450,11 +667,13 @@ class SensorEventDetector:
     def completed(self, serverAddr):
         
         self.sendMessage("quitting:", serverAddr)
-        self.debug_file.close()  # Close our writing file
+        self.sock.shutdown(SHUT_RDWR)
+        self.sock.close()
+        # self.debug_file.close()  # Close our writing file
         
     
     def __init__(self, \
-                     video_file, yolo_model, track_alg, camera_id, currentAddr, serverAddr,\
+                     yolo_model, track_alg, camera_id, currentAddr, serverAddr,\
                     relevant_frames, result_dir, recover_lost_track, \
                     buffer_zone, ignore_stationary, use_gt):
         
@@ -469,8 +688,8 @@ class SensorEventDetector:
         #  and tracking.
         self.use_gt = use_gt
         self.gt_mapping = {}  #this maps a special ID to our numbers
-        if self.use_gt:
-            self.gt_source = gt_source_drone(video_file)
+        # if self.use_gt:
+        #     self.gt_source = gt_source_drone(video_file)
         
         # Determine relevant frames:
         self.relevant_frames = relevant_frames
@@ -479,8 +698,8 @@ class SensorEventDetector:
         # Used to track debug data
         # self.debug_output = {"detections":[], "events":[], "tracks":[]}
         # Get files for us to put stuff into
-        debug_filename = '/'.join([args.result_dir, "ae"+str(camera_id)+".txt"])
-        self.debug_file = open(debug_filename, "w", buffering=1)
+        debug_filename = '/'.join([self.result_dir, "ae"+str(camera_id)+".txt"])
+        # self.debug_file = open(debug_filename, "w", buffering=1)
         
         # Filter classes
         filter_classes = [0.0, 1.0]
@@ -503,15 +722,17 @@ class SensorEventDetector:
         
         
         # Now, initialize our video capture
-        if video_file:
-            self.cap = cv2.VideoCapture(video_file)
-            self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            self.pixel_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            self.pixel_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = int(self.cap.get(cv2.CAP_PROP_FPS))
+        # if video_file:
+            # self.cap = cv2.VideoCapture(video_file)
+            # self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            # self.pixel_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            # self.pixel_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            # fps = int(self.cap.get(cv2.CAP_PROP_FPS))
 
-            if self.use_gt:
-                self.gt_source.generate_cam_dict(self.pixel_width, self.pixel_height)
+            # if self.use_gt:
+            #     self.gt_source.generate_cam_dict(self.pixel_width, self.pixel_height)
+
+            
             
             
 
@@ -519,13 +740,13 @@ class SensorEventDetector:
 #                 f_metadata = open(args.metadata)
 #                 metadata = json.load(f_metadata)
 
-        else:
-            client_socket = setup_socket()
-            client_socket.connect((address, port))
-            sock_from_server, sock_to_server = setup_zmq(args.address_from_server,args.address_to_server,args.port_from_server,args.port_to_server)
-            pixel_width = 800
-            pixel_height = 600
-            imgsz = pixel_width*pixel_height*4
+        # else:
+        #     client_socket = setup_socket()
+        #     client_socket.connect((address, port))
+        #     sock_from_server, sock_to_server = setup_zmq(args.address_from_server,args.address_to_server,args.port_from_server,args.port_to_server)
+        #     pixel_width = 800
+        #     pixel_height = 600
+        #     imgsz = pixel_width*pixel_height*4
             
         # Also initialize our trackers
         #Choose tracking algorithm
@@ -547,25 +768,88 @@ class SensorEventDetector:
         self.currentAddr = currentAddr
         self.serverAddr = serverAddr
         self.sock = None
-        # do the handshake
-        self.handshake(currentAddr, serverAddr)
         
 
+        # do the handshake
+        self.handshake(currentAddr, serverAddr)
+
+        
+
+        
+
+        # Configs for nms
+        self.conf_thres = 0.25
+        self.iou_thres = 0.45
+        self.classes = None
+        self.agnostic_nms = False
+        self.max_det = 1000
+
+        
+        
+    
+    # Do a prediction using the model and NMS
+    def do_prediction(self, image):
+
+        # Predict using the model
+        output = self.yolo_model(image)
+
+        # Now run nms
+        pred = non_max_suppression([output], self.conf_thres, self.iou_thres, \
+            self.classes, self.agnostic_nms, max_det=self.max_det)
+        
+        line_return = []
+        # Process predictions
+        start_process_time = time.time()
+        # print(pred[0])
+        for i, det in enumerate(pred):  # per image
+
+            im0, frame = image.copy(), 0
+
+            # s += '%gx%g ' % im.shape[2:]  # print string
+            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+            # imc = im0.copy() if self.save_crop else im0  # for self.save_crop
+            # annotator = Annotator(im0, line_width=self.line_thickness, example=str(self.names))
+            if len(det):
+                # print("here")
+                # Rescale boxes from img_size to im0 size
+                # det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], im0.shape).round()
+
+                # Print results
+                # for c in det[:, 5].unique():
+                #     n = (det[:, 5] == c).sum()  # detections per class
+                #     s += f"{n} {self.names[int(c)]}{'s' * (n > 1)}, "  # add to string
+
+                # Write results
+                for det_row in reversed(det):
+
+                    xyxy = det_row[:4].cpu()
+                    conf = det_row[4].cpu()
+                    cls = det_row[5].cpu()
+                    extra = det_row[6:].cpu()
+
+
+                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                    line = (cls, *xywh, conf, *extra) # if self.save_conf else (cls, *xywh)  # label format
+                    line_return.append(('%g ' * len(line)).rstrip() % line)
+
+        return line_return
+    
+
     # Grab an image at an index, and get the yolo results
-    def do_object_detection(self, frame_index):
+    def do_object_detection(self, frame, frame_index):
         
         start_read_time = time.time()
         # On our first frame capture, we use set
-        image = None
-        if self.current_cap_frame_index < 0:
-            self.cap.set(1, frame_index)
-            ret, image = self.cap.read()
-        else:  # Otherwise, we capture from the current frame index to the current goal frame
-            frame_count_diff = frame_index - self.current_cap_frame_index
-            for i in range(frame_count_diff):
-                ret, image = self.cap.read()
+        # image = None
+        # if self.current_cap_frame_index < 0:
+        #     self.cap.set(1, frame_index)
+        #     ret, image = self.cap.read()
+        # else:  # Otherwise, we capture from the current frame index to the current goal frame
+        #     frame_count_diff = frame_index - self.current_cap_frame_index
+        #     for i in range(frame_count_diff):
+        #         ret, image = self.cap.read()
         # Be sure to set the new frame index
-        self.current_cap_frame_index = frame_index
+        # self.current_cap_frame_index = frame_index
 
         res_lines = []
 
@@ -573,9 +857,12 @@ class SensorEventDetector:
         if self.use_gt:  # Get the ground truth res lines
             res_lines = self.gt_source.generate_results_for_frame(self.camera_id, frame_index)
         else:
-            res_lines = self.yolo_model.run(image) #Run yolo
+            res_lines = self.do_prediction(frame)
+            # print(len(res_lines))
+            # print(res_lines[0])
+            # res_lines = self.yolo_model.run(image) #Run yolo
         
-        return image, res_lines
+        return frame, res_lines
 
     # Check if a newly assigned track is allowed
     def allowed_track_entrance(self, bbox):
@@ -812,14 +1099,14 @@ class SensorEventDetector:
 
     
     # Execute our full detection pipeline, from yolo to tracking to watchbox processing
-    def execute_full_detection(self, frame_index, stride):
+    def execute_full_detection(self, frame_index, frame, stride):
             
         start_loop_time = time.time()
         
         data_out = [frame_index]
 
         # Get the object detection result
-        image, res_lines = self.do_object_detection(frame_index)
+        image, res_lines = self.do_object_detection(frame, frame_index)
         # print("Time for object detection: %f" % (time.time()-start_loop_time))
 
 
@@ -835,8 +1122,8 @@ class SensorEventDetector:
         # Line thickness of 2 px
         thickness = 2
         # Using cv2.putText() method
-        image = cv2.putText(image, 'Traffic Camera ID: ' + str(self.camera_id), org, font, 
-                   fontScale, color, thickness, cv2.LINE_AA)
+        # image = cv2.putText(image, 'Traffic Camera ID: ' + str(self.camera_id), org, font, 
+        #            fontScale, color, thickness, cv2.LINE_AA)
 
 
         #pdb.set_trace()
@@ -854,6 +1141,7 @@ class SensorEventDetector:
             # Now, update our tracker
             track_start_time = time.time()
             image, issue_pause = self.update_tracker(image, res_lines, frame_index)
+
 #             out_track_data = self.tracks
 #             for tkey in out_track_data.keys():
 #                 out_track_data[tkey] = list(out_track_data[tkey])
@@ -871,51 +1159,51 @@ class SensorEventDetector:
         # Perform extra processing, such as for tripwires of watchboxes
         func_start_time = time.time()
         image, frame_result = self.execute_additional_functions(image, frame_index)
-        # self.debug_output["events"].append((frame_result, frame_index))
+        # # self.debug_output["events"].append((frame_result, frame_index))
         data_out.append(frame_result)
         
         # print("Time for additional functions: %f" % (time.time()-func_start_time))
         
         # Now, if we actually have results, be sure to send it back to the server
-        if frame_result:
-            self.sendMessage(frame_result, self.serverAddr)
-            # When we send something, be sure to listen for a message back
-            # returned_data, addr = self.sock.recvfrom(512)
-            # returned_data = returned_data.decode()
+        # if frame_result:
+        #     self.sendMessage(frame_result, self.serverAddr)
+        #     # When we send something, be sure to listen for a message back
+        #     # returned_data, addr = self.sock.recvfrom(512)
+        #     # returned_data = returned_data.decode()
             
-            # If our returned data is somehting other than 'none':
-            # if returned_data != "none":
-            # First, create a folder for ce_images
-            filepath = [self.result_dir, "ce_images"]
-            if not os.path.exists('/'.join(filepath)):
-                os.mkdir('/'.join(filepath))
-            filename = "frame"+str(frame_index)+"_cam"+str(self.camera_id) + ".jpg"
-            filepath.append(filename)
-            cv2.imwrite('/'.join(filepath), image)
+        #     # If our returned data is somehting other than 'none':
+        #     # if returned_data != "none":
+        #     # First, create a folder for ce_images
+        #     filepath = [self.result_dir, "ce_images"]
+        #     if not os.path.exists('/'.join(filepath)):
+        #         os.mkdir('/'.join(filepath))
+        #     filename = "frame"+str(frame_index)+"_cam"+str(self.camera_id) + ".jpg"
+        #     filepath.append(filename)
+        #     cv2.imwrite('/'.join(filepath), image)
                 
         # Remember the image data for ground truth times
-        for rframe in self.relevant_frames:
-            if abs(frame_index - rframe[0]) < stride:
+        # for rframe in self.relevant_frames:
+        #     if abs(frame_index - rframe[0]) < stride:
                 
-                # ground truth folder
-                filepath = [self.result_dir, "gt_images"]
-                if not os.path.exists('/'.join(filepath)):
-                    os.mkdir('/'.join(filepath))
+        #         # ground truth folder
+        #         filepath = [self.result_dir, "gt_images"]
+        #         if not os.path.exists('/'.join(filepath)):
+        #             os.mkdir('/'.join(filepath))
                 
-                # Save the image
-                filename = "frame"+str(frame_index)+"_cam"+str(self.camera_id) + "_ev" + rframe[1] + ".jpg"
-                filepath.append(filename)
-                cv2.imwrite('/'.join(filepath), image)
+        #         # Save the image
+        #         filename = "frame"+str(frame_index)+"_cam"+str(self.camera_id) + "_ev" + rframe[1] + ".jpg"
+        #         filepath.append(filename)
+        #         cv2.imwrite('/'.join(filepath), image)
 
-        cv2.imshow('image'+str(self.camera_id),image)
-        cv2.waitKey(1)
+        # cv2.imshow('image'+str(self.camera_id),image)
+        # cv2.waitKey(1)
 
         if issue_pause:
             print("Pausing")
             # input()
         
         # Write data out to file
-        self.debug_file.write(':::'.join([str(x) for x in data_out]) + "\n")
+        # self.debug_file.write(':::'.join([str(x) for x in data_out]) + "\n")
         
 
 
@@ -957,37 +1245,46 @@ fps = 10
 #state = state_add(state,['watchbox'],new_function)
 
 parser = argparse.ArgumentParser(description='Edge Processing Node')
-parser.add_argument('--address', type=str, help='Address to connect to receive images')
-parser.add_argument('--port', type=int, help='Port to connect to receive images')
-parser.add_argument('--address_to_server', type=str, help='Address to connect to send atomic events')
-parser.add_argument('--port_to_server', type=int, help='Port to connect to send atomic events')
-parser.add_argument('--address_from_server', type=str, help='Address to connect to receive topic subscriptions')
-parser.add_argument('--port_from_server', type=int, help='Port to connect to receive topic subscriptions')
-parser.add_argument('--camera_id', type=int, help='Camera id')
+# parser.add_argument('--address', type=str, help='Address to connect to receive images')
+# parser.add_argument('--port', type=int, help='Port to connect to receive images')
+# parser.add_argument('--address_to_server', type=str, help='Address to connect to send atomic events')
+# parser.add_argument('--port_to_server', type=int, help='Port to connect to send atomic events')
+# parser.add_argument('--address_from_server', type=str, help='Address to connect to receive topic subscriptions')
+# parser.add_argument('--port_from_server', type=int, help='Port to connect to receive topic subscriptions')
+# parser.add_argument('--camera_id', type=int, help='Camera id')
 parser.add_argument('--track_alg', type=str, default='Byte', help='Track algorithm: Byte, Sort, DeepSort or MOTDT')
-parser.add_argument('--video-file', type=str, default='', help='Open video file instead of connecting to server')
-parser.add_argument('--yolo-weights', type=str, default='./yolov5s.pt', help="YOLO weights file")
-parser.add_argument('--device', type=str, default='0', help="Device where to run YOLO")
-parser.add_argument('--metadata', type=str, help='Camera metadata file')
-parser.add_argument('--save-tracking-dir', type=str, default='', help='Save tracking results to the directory specified')
-parser.add_argument('--create_video', type=str, default='', help='Create video. Specify file name.')
-parser.add_argument('--yolo-synth-output', type=str, default='', help='Provide YOLO files and bypass the model. Specify the directory name.')
+# parser.add_argument('--video-file', type=str, default='', help='Open video file instead of connecting to server')
+parser.add_argument('--weights', type=str, default='./yolov5s.engine', help="YOLO weights file")
+# parser.add_argument('--device', type=str, default='0', help="Device where to run YOLO")
+# parser.add_argument('--metadata', type=str, help='Camera metadata file')
+# parser.add_argument('--save-tracking-dir', type=str, default='', help='Save tracking results to the directory specified')
+# parser.add_argument('--create_video', type=str, default='', help='Create video. Specify file name.')
+# parser.add_argument('--yolo-synth-output', type=str, default='', help='Provide YOLO files and bypass the model. Specify the directory name.')
 
-# New stuff...
-parser.add_argument('--video_files', nargs='+', help='Video files.', required = True)
-parser.add_argument('--camera_ids', nargs='+', help='Corresponding camera ids to each video file.', required = True)
-parser.add_argument('--start_port', type=int, required = True)
-parser.add_argument('--server_port', type=int, required = True)
-parser.add_argument('--current_take', type=int, required = True)
-parser.add_argument('--result_dir', type=str, required = True)
-parser.add_argument('--recover_lost_track', action='store_true')  # If our tracker keeps lost tracks
-parser.add_argument('--no_recover_lost_track', action='store_true')  # If our tracker keeps lost tracks
-parser.add_argument('--buffer_zone', type=int, required = True)
-parser.add_argument('--ignore_stationary', action='store_true')  # If our tracker keeps lost tracks
-parser.add_argument('--no_ignore_stationary', action='store_true')  # If our tracker keeps lost tracks
-parser.add_argument('--no_use_gt', action='store_true')
-parser.add_argument('--use_gt', action='store_true')  # If we use the ground truth
+# # New stuff...
+# parser.add_argument('--video_files', nargs='+', help='Video files.', required = True)
+# parser.add_argument('--camera_ids', nargs='+', help='Corresponding camera ids to each video file.', required = True)
+# parser.add_argument('--start_port', type=int, required = True)
+# parser.add_argument('--server_port', type=int, required = True)
+# parser.add_argument('--current_take', type=int, required = True)
+# parser.add_argument('--result_dir', type=str, required = True)
+# parser.add_argument('--recover_lost_track', action='store_true')  # If our tracker keeps lost tracks
+# parser.add_argument('--no_recover_lost_track', action='store_true')  # If our tracker keeps lost tracks
+# parser.add_argument('--buffer_zone', type=int, required = True)
+# parser.add_argument('--ignore_stationary', action='store_true')  # If our tracker keeps lost tracks
+# parser.add_argument('--no_ignore_stationary', action='store_true')  # If our tracker keeps lost tracks
+# parser.add_argument('--no_use_gt', action='store_true')
+# parser.add_argument('--use_gt', action='store_true')  # If we use the ground truth
+
+# parser.add_argument('--ce', type=int, help='Determines which CE we want to capture')
+# parser.add_argument('--server_port', type=int, help='Determines which CE we want to capture')
+# parser.add_argument('--result_dir', type=str, help='this is where we will output our json')
+# parser.add_argument('--debug_output', type=str, help='this is where we will output debug data')
+
+
+
 args = parser.parse_args()
+
 
 
 
@@ -1003,8 +1300,14 @@ args = parser.parse_args()
 # cap.release()
 
 
-if not args.yolo_synth_output:
-    yolo = Yolo_Exec(weights=args.yolo_weights, imgsz=[1920],conf_thres=0.5, device=args.device, save_conf=True) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
+# if not args.yolo_synth_output:
+    # yolo = Yolo_Exec(weights=args.yolo_weights, imgsz=[1920],conf_thres=0.5, device=args.device, save_conf=True) #'../../delivery-2022-12-01/t72detect_yv5n6.pt',imgsz=[2560],conf_thres=0.5)
+yolo = Yolov5Trt(classes="coco",
+                    backend="tensorrt",
+                    weight=args.weights,
+                    auto_install=False,
+                    dtype="fp16")
+
 
 # last_message_num = 0
 
@@ -1022,6 +1325,8 @@ class ByteTrackArgs:
         self.match_thresh = match_thresh
         self.mot20 = False 
         self.track_buffer = track_buffer
+
+
 
 
 
@@ -1045,88 +1350,113 @@ if __name__=='__main__':
     #  Class 1.0 is the BTR80
 
         
-        recover_lost_track = False
-        if args.recover_lost_track:
-            recover_lost_track = True
-        ignore_stationary = False
-        if args.ignore_stationary:
-            ignore_stationary = True
+        # recover_lost_track = False
+        # if args.recover_lost_track:
+        #     recover_lost_track = True
+        # ignore_stationary = False
+        # if args.ignore_stationary:
+        #     ignore_stationary = True
 
 
         event_detectors = []
-        video_files = args.video_files
-        print(video_files)
-        print(args.camera_ids)
-        # video_files = ["../take_75/neuroplex_cam3_take_75.mp4"]
+        # video_files = args.video_files
+        # print(video_files)
+        # print(args.camera_ids)
+        
+        video_file = "../video.mp4"
+        camera_id = 0
 
 
         # Next, also be sure to register the frames of interest
-        ce_file = "../neuroplexLog.csv"
+        # ce_file = "../neuroplexLog.csv"
         # This is of the structure   { ce_number : [(take_number, [ae_name, ae_name, etc],[frame_index, frame_index, etc]), ....] }
-        relevant_frames = parse_gt_log(ce_file, args.current_take)
+        # relevant_frames = parse_gt_log(ce_file, args.current_take)
 
 
         # Initialize all of our detectors for each video file
         event_detector_ip = "127.0.0.1"
-        event_detector_port = args.start_port
+        event_detector_ip = "192.168.55.1"
+        # event_detector_port = args.start_port
+        event_detector_port = 6703
         ce_server_ip = "127.0.0.1"
-        ce_server_port = args.server_port
-        for v_i, vfile in enumerate(video_files):
+        ce_server_ip = "192.168.55.100"
+        # ce_server_port = args.server_port
+        ce_server_port = 6792
+        SERVER_ADDR = (ce_server_ip, ce_server_port)
+
+        result_dir = "results"
+        recover_lost_track = False
+        buffer_zone = 20
+        ignore_stationary = False
+        use_gt = False
+        relevant_frames = None
+        # for v_i, vfile in enumerate(video_files):
 
             # We only initialize for camera 3
             # if "cam2" not in vfile: # or "cam2" not in vfile:
             #     continue
 
-            # First, initialize the class
-            eventDetector = SensorEventDetector(vfile, yolo, args.track_alg, args.camera_ids[v_i], \
+        # First, initialize the class
+
+
+
+        while True:
+            eventDetector = SensorEventDetector(yolo, args.track_alg, camera_id, \
                                                 (event_detector_ip, event_detector_port),
-                                                (ce_server_ip, ce_server_port), relevant_frames, args.result_dir, \
-                                                    recover_lost_track, args.buffer_zone, \
-                                                    ignore_stationary, args.use_gt)
-            event_detector_port += 1
-            event_detectors.append(eventDetector)
+                                                (ce_server_ip, ce_server_port), relevant_frames, result_dir, \
+                                                    recover_lost_track, buffer_zone, \
+                                                    ignore_stationary, use_gt)
+
+            # event_detector_port += 1
+            # event_detectors.append(eventDetector)
 
 
-        total_frames = eventDetector.total_frames
-        start_frame = 0 # int(1800*5) # int(1800*4.35)
-        stride = 3  # Speed up our execution - we skip every few frames
+            # total_frames = eventDetector.total_frames
+            start_frame = 0 # int(1800*5) # int(1800*4.35)
+            stride = 3  # Speed up our execution - we skip every few frames
 
-        # Make sure we have a directory to save some images - basically when events happen 
-        # This should be for both ground truth frames () and when this detector detects them.
+            # Make sure we have a directory to save some images - basically when events happen 
+            # This should be for both ground truth frames () and when this detector detects them.
 
 
-        # Now, iterate over all frames 
-        last_sample_time = time.time()
-        num_frames = 0
-        for frame_index in tqdm(range(start_frame, total_frames, stride)): 
-            for eventDetector in event_detectors:
-                # Then we can run the full detection pipeline
-                eventDetector.execute_full_detection(frame_index, stride)
-            
-            if time.time() - last_sample_time > 1:
-                # print("Processing rate: %d fps (per camera)" % (num_frames))
-                num_frames = 0
-                last_sample_time = time.time()
-            num_frames += 1
+            # Now, iterate over all frames 
+            last_sample_time = time.time()
+            num_frames = 0
+            frame_index = 0
+            # for frame_index in tqdm(range(start_frame, total_frames, stride)):
 
-        # Next, iterate again over all the eventDetectors to print their results to a file
+            for frame in tqdm(eventDetector.reader):
 
-        for e_i, eventDetector in enumerate(event_detectors):
-            eventDetector.cap.release()
-            # We are quitting...
-            eventDetector.completed(eventDetector.serverAddr)
-            # print(e_i)
-            # Write our results to a json file
-            # result_file = '/'.join([args.result_dir, "ae"+str(args.camera_ids[e_i])+".json"])
-            # with open(result_file, "w") as wfile:
-            #     json.dump(eventDetector.debug_output, wfile)
+                # for eventDetector in event_detectors:
+                    # Then we can run the full detection pipeline
+                eventDetector.execute_full_detection(frame_index, frame, stride)
                 
+                if time.time() - last_sample_time > 1:
+                    # print("Processing rate: %d fps (per camera)" % (num_frames))
+                    num_frames = 0
+                    last_sample_time = time.time()
+                num_frames += 1
+                frame_index += 1
+
+            # Next, iterate again over all the eventDetectors to print their results to a file
+
+            # for e_i, eventDetector in enumerate(event_detectors):
+                # eventDetector.cap.release()
+                # We are quitting...
+            eventDetector.completed(eventDetector.serverAddr)
+                # print(e_i)
+                # Write our results to a json file
+                # result_file = '/'.join([args.result_dir, "ae"+str(args.camera_ids[e_i])+".json"])
+                # with open(result_file, "w") as wfile:
+                #     json.dump(eventDetector.debug_output, wfile)
+                    
 
 
 
 
-        # Lastly, specifically add a tag if this executed correctly
-        print("Ended correctly.")
+            # Lastly, specifically add a tag if this executed correctly
+            print("Ended correctly.")
+            time.sleep(2)
     
     except Exception as e:
         # exc_type, exc_obj, exc_tb = sys.exc_info()

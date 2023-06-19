@@ -5,14 +5,247 @@ import subprocess
 import psutil
 
 from parse_utils import parse_gt_log, get_videos, get_takes_of_type
+from LanguageCE.test_ce import build_ce1, build_ce2, build_ce3
 
+import socket
+from socket import SHUT_RDWR
+import threading
+import argparse
+import traceback
 
 
 def get_pid(name):
     return check_output(["pidof",name])
 
 
+# Send data - encode it 
+def sendMessage(message, addr, conn):
+    # Turn the message into bytes
+    message = str(message).encode()
+    print("sending to " + str(addr))
+    # sock.sendto(message, addr)
+    conn.send(message)
+        
+
+# This is our listening server, which is where we get all of our results
+#  This is the flow of information between server and client:
+#  clients say hello - this establishes which clients are active
+#  server sends video
+#  Clients acknowledge they have received and loaded the video
+#  Server sends start signal
+
+
+
+def server_listen(ce_obj, ce_structure, server_addr, client_addr, video_path):
+
+    # First, bind the server
+    serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    serverSocket.bind(server_addr)
+    serverSocket.listen()
+    
+    # Open our file for writing
+    # debug_filename = '/'.join([ce_obj.result_dir, "ce_output.txt"])
+    # debug_file = open(debug_filename, "w", buffering=1)
+    
+    print("Listening on " + str(server_addr))
+
+    # Send data to edge clients
+    # time.sleep(2)
+
+    # Say hello to clients
+    # for client_addr in client_addresses:
+    #     sendMessage("serverhello", client_addr, serverSocket)
+    #     print("HERE")
+
+    # Accept the connection from the client
+    conn, addr = serverSocket.accept()
+    print("Connection with " + str(addr) + " established")
+
+    # Check to see what camera ID this is
+    data = conn.recv(512)
+    decoded = data.decode()
+    cam_id = int(decoded.split(":")[1])
+    ce_obj.client_info[cam_id] = addr
+    print("Received camid of " + str(cam_id))
+
+    print("Sending video data...")
+    # Open the video file and transmit it
+    with open(video_path, "rb") as video_file:
+        video_data = video_file.read()
+        # while video_data:
+        conn.sendall(video_data)
+        time.sleep(2)
+        conn.send(b"done")
+        # sendMessage("Hello", client_addr, serverSocket)
+        # video_data = video_file.read()
+    print("Sent video data!")
+
+
+    # Now for the recv logic
+    while True:
+        
+        data = conn.recv(512)
+        if data:
+            decoded = data.decode()
+
+            # If this is a handshake message containing camera id
+            # if "camera_id:" in decoded:
+            #     cam_id = int(decoded.split(":")[1])
+            #     # ce_obj.client_info[cam_id] = addr
+            #     print(cam_id)
                 
+
+            # If this is a message on having received the video and is ready to run
+            #  Send function information
+            if "ready" in decoded:
+
+                print(ce_obj.config_watchboxes)
+                # Be sure to hand back the corresponding watchboxes
+                if cam_id in ce_obj.config_watchboxes:
+                    return_message = "watchboxes:" + str(ce_obj.config_watchboxes[cam_id])
+                else:
+                    return_message = "watchboxes:[]"
+                print(return_message)
+                sendMessage(return_message, addr, conn)
+
+
+            elif "quitting:" in decoded:
+
+                print("quitout!")
+
+                # Write our data to file
+                # result_file = '/'.join([ce_obj.result_dir, "ce_output.json"])
+                # with open(result_file, "w") as wfile:
+                #     json.dump(ce_obj.result_output, wfile)
+                # break
+                # debug_file.close()
+                conn.shutdown(SHUT_RDWR)
+                conn.close()
+                break
+            else:
+                
+                # Format is like: [{'camera_id': '2', 'results': [[[0], [True], 3]], 'time': 17910}]
+                
+                # Otherwise, this is data.
+                incoming_data = eval(decoded)
+                print("Receiving " + str(incoming_data))
+                
+                
+                # Get the timestamp of this event:
+                frame_index_incoming = incoming_data[0]["time"]
+                data_to_write = [frame_index_incoming]
+                
+                
+                # ce_obj.result_output["incoming"].append([incoming_data, frame_index_incoming])
+                data_to_write.append(incoming_data)
+
+
+                ce_obj.update(incoming_data)
+                result, change_of_state, old_results = ce_obj.evaluate(frame_index_incoming)
+
+                # ce_obj.result_output["events"].append([\
+                #                                       result, \
+                #                                       change_of_state, \
+                #                                       old_results, \
+                #                                       frame_index_incoming])
+                for res in result:
+                    data_to_write.append([res, change_of_state, old_results])
+                
+                    debug_file.write(":::".join([str(x) for x in data_to_write]) + "\n")
+                    data_to_write = data_to_write[:-1]  # Pop the last element back out
+                
+                # Check if any event became true
+                # message_to_send = "none"
+                # if len(result) >  and result[3]:
+                #     event_turned_true = result[0][0]
+                #     message_to_send = event_turned_true
+                # Send this message back 
+                # sendMessage(message_to_send, addr, serverSocket)
+                    
+
+                if change_of_state:
+                    print()
+                    print(old_results)
+                    print(result)
+                    # Send data to our fsm display server
+                    sendMessage((old_results, result), ("127.0.0.1", 8001), serverSocket)
+                        
+                        
+                    
+        # except Exception as e:
+        #     print(traceback.format_exc())
+        #     input()
+    
+    # debug_file.close()
+
+def setup_ce_detector(ce_index, server_addr, client_addresses, video_files):
+
+    try:
+        complexEventObj = None
+        ce_structure = []
+        if ce_index == 1:
+            complexEventObj, ce_structure = build_ce1()
+        
+            # complexEventObj.result_dir = args.result_dir
+        
+            # Our bounding boxes are as follows:
+            watchboxes = {
+                2: [ [1,1,1919,1079, 1], [213,274,772,772,1], [816,366,1200,725,1], [1294,290,1881,765,1]],
+                1: [ [413,274,1072,772, 0] ],
+                0: [ [1,1,1919,1079, 1] ]
+            }
+            complexEventObj.config_watchboxes = watchboxes
+
+        elif ce_index == 2:
+
+            complexEventObj, ce_structure =  build_ce2()
+            # complexEventObj.result_dir = args.result_dir
+
+            watchboxes = {
+                2: [ [1,1,1919,1079,1], [213,274,772,772,1], [816,366,1200,725,1], [1294,290,1881,765,1]],
+                1: [ [1294,274,1881,765, 0] ],
+                0: [ [1,1,1919,1079, 1] ]
+            }
+            complexEventObj.config_watchboxes = watchboxes
+
+        elif ce_index == 3:
+
+            complexEventObj, ce_structure =  build_ce3()
+            # complexEventObj.result_dir = args.result_dir
+
+            # Our bounding boxes are as follows:
+            watchboxes = {
+                1: [ [1,1,1919,1079, 0], [213,274,772,772,1], [750,366,1200,725,0], [1210,290,1750,765,1], [1,1,1919,1079,1] ],
+                0: [ [1,1,1919,1079, 0], [1,1,1919,1079, 1] ]
+            }
+            complexEventObj.config_watchboxes = watchboxes
+
+    except Exception as e:
+        print(traceback.format_exc())
+        input()
+    
+    
+
+    # Set up some TCP threads for communication
+    server_threads = []
+    for c_i, client_addr in enumerate(client_addresses):
+        # Set up our server
+        server_listen_thread = threading.Thread(target=server_listen, \
+            args=(complexEventObj,ce_structure,server_addr,client_addr,video_files[c_i],))
+        server_listen_thread.start()
+        server_threads.append(server_listen_thread)
+
+    # Wait for all server threads to exit
+    while True:
+        time.sleep(1)
+        # Check if all server threads are alive
+        threads_status = [x.is_alive() for x in server_threads]
+        if not any(threads_status):  # If all are dead, we can move on
+            break
+
+    print("FINISHED!")
+    
+
 
     
 # Get the process IDs of our camera and server programs
@@ -32,7 +265,27 @@ def get_program_pids(camera_program, server_program):
     return camera_pid, server_pid
 
 
+
+
+
+
 def execute_main_experiment():
+
+    server_port = 6792
+    client_port = 6703
+
+    server_addr = ("192.168.55.100", server_port)
+    client_addr = ("192.168.55.1", client_port)
+    client_addresses = [client_addr]
+    video_files = [["../people.mp4"], ["../people.mp4"]]
+
+    # Set up the server
+    for videos_to_send in video_files:
+        setup_ce_detector(1, server_addr, client_addresses, videos_to_send)
+
+
+
+def execute_main_experiment2():
 
     server_port = 6792
     start_port = 6703
