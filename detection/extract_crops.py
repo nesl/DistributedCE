@@ -162,6 +162,7 @@ while True:
 		
 		print("Frame: ", frame_num)
 
+		#Make yolo detections
 		for line_idx,line in enumerate(res_lines):
 			coordinates_line = line.split()
 			
@@ -177,9 +178,10 @@ while True:
 			boxes.append(box_voc)
 			confidences.append(float(coordinates_line[5]))
 			
-			cv2.rectangle(frame_copy, (box_voc[0], box_voc[1]), (box_voc[2], box_voc[3]), (0, 0, 255), 1)
-			
-			frame_copy = cv2.putText(frame_copy, coordinates_line[0]+" "+coordinates_line[5]+" "+coordinates_line[6], (box_voc[0], box_voc[1]), font, fontScale, color, thickness, cv2.LINE_AA)
+			if args.interactive:
+				cv2.rectangle(frame_copy, (box_voc[0], box_voc[1]), (box_voc[2], box_voc[3]), (0, 0, 255), 1)
+				
+				frame_copy = cv2.putText(frame_copy, coordinates_line[0]+" "+coordinates_line[5]+" "+coordinates_line[6], (box_voc[0], box_voc[1]), font, fontScale, color, thickness, cv2.LINE_AA)
 			
 			frames.append(frame_copy)
 
@@ -217,7 +219,7 @@ while True:
 		
 
 	if args.model:
-		classifier = pipeline("image-classification", model=args.model, device=0)
+		classifier = pipeline("image-classification", model=args.model, device=int(args.device))
 
 	if not frames:
 		print("No detections")
@@ -261,6 +263,7 @@ while True:
 	elif args.end != -1 and frame_num >= args.end:
 		break
 	else:
+		#Make sure bounding box detections are filtered with iou
 		ious = ops.box_iou(torch.tensor(boxes), torch.tensor(boxes))
 		to_delete = []
 		to_maintain = []
@@ -281,17 +284,20 @@ while True:
 		detection_extra = np.array([])
 		frame_copy = frame.copy()
 		
+		"""
 		im_pil = []
 		for c_idx in to_maintain:
 			img = cv2.cvtColor(crops[c_idx], cv2.COLOR_BGR2RGB)
 			im_pil.append(Image.fromarray(img))
 		
 		results = classifier(im_pil, top_k=6)
+		"""
 
+		#Prepare data for tracking
 		for r_idx,c_idx in enumerate(to_maintain):
 			#print(results[0], boxes[c_idx])
 
-			class_label = results[r_idx][0]["label"][-1:]
+			#class_label = results[r_idx][0]["label"][-1:]
 			#if labels and class_label in labels and results[0]["score"] > 0.5:
 			
 			#if results[0]["score"] > 0.5:
@@ -301,15 +307,17 @@ while True:
 			else:
 				detection_bboxes = np.concatenate((detection_bboxes, np.expand_dims(np.array(boxes[c_idx]),axis=0)),axis=0)
 			#detection_bboxes = np.append(detection_bboxes, np.expand_dims(np.array(box_voc),axis=0),axis=0)
-			detection_class_ids = np.append(detection_class_ids, int(class_label))
+			detection_class_ids = np.append(detection_class_ids, 0)
 			detection_confidences = np.append(detection_confidences, confidences[c_idx])
+			
+			detection_extra = np.append(detection_extra, 0)
 
-			results[r_idx].sort(key=sorting_labels)
-			extra_data = np.array([cl["score"] for cl in results[r_idx]])
-			if detection_extra.size == 0:
-				detection_extra = np.expand_dims(extra_data,axis=0)
-			else:
-				detection_extra = np.concatenate((detection_extra,np.expand_dims(extra_data,axis=0)),axis=0 )
+			#results[r_idx].sort(key=sorting_labels)
+			#extra_data = np.array([cl["score"] for cl in results[r_idx]])
+			#if detection_extra.size == 0:
+			#	detection_extra = np.expand_dims(extra_data,axis=0)
+			#else:
+			#	detection_extra = np.concatenate((detection_extra,np.expand_dims(extra_data,axis=0)),axis=0 )
 			
 			cv2.rectangle(frame_copy, (int(boxes[c_idx][0]), int(boxes[c_idx][1])), (int(boxes[c_idx][2]), int(boxes[c_idx][3])), (255, 0, 0), 1)
 		
@@ -332,7 +340,10 @@ while True:
 		
 		image = cv2.putText(frame_copy, ' Frame: ' + str(frame_num), (50, 50), font, 
 	           fontScale, (0, 255, 0), thickness, cv2.LINE_AA)
-		for t_idx,t in enumerate([*online_targets,*lost_tracks]):
+	           
+		im_pil = []
+		true_tracks = []
+		for t_idx,t in enumerate([*online_targets,*lost_tracks]): #Results of tracking, save bboxes according to track
 
 			bbox = t.tlbr
 			
@@ -357,32 +368,49 @@ while True:
 			track_id = t.track_id
 			
 			if track_id not in bbox_history:
-				bbox_history[track_id] = {"frame":[],"bbox":[]}
+				bbox_history[track_id] = {"frame":[],"bbox":[], "class":[]}
 				
 			bbox_history[track_id]["bbox"].append(bbox)
 			bbox_history[track_id]["frame"].append(frame_num)
 			
-			class_history = t.detected_class #For Bytetracker, haven't tested with other ones
-			detection_extra = t.detected_extra		
-			class_detected = np.bincount(class_history).argmax()
+			crop = frame[int(bbox[1]):int(bbox[3]), int(bbox[0]):int(bbox[2])]
+			img = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+			im_pil.append(Image.fromarray(img))
+			
+		
+			true_tracks.append(t)
+
+					
 
 			cv2.rectangle(frame_copy, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (0, 0, 255), 1)
 			
-			if t_idx < online_targets_len:
-				color = (255, 153, 255) #violet
-			else:
-				color = (255, 255, 0) #cyan
-			
-			frame_copy = cv2.putText(frame_copy, str(track_id) + "_" + str(class_detected), (int(bbox[0]), int(bbox[1])), font, fontScale, color, thickness, cv2.LINE_AA)			
+					
 
+			"""
 			try:
 				yolo_box = pbx.convert_bbox(tuple(bbox), from_type="voc", to_type="yolo", image_size=(pixel_width,pixel_height))
 			except:
 				pdb.set_trace()
 
 			txt_line += "%d %f %f %f %f %d\n" % (class_detected, *yolo_box, track_id) 
-			
+			"""
 		#print(txt_line)
+		
+		results = classifier(im_pil, top_k=6) #Run image classifier
+		
+		for t_idx,t in enumerate(true_tracks): #Process class from classifier
+			track_id = t.track_id
+			class_label = results[t_idx][0]["label"][-1:]
+			bbox_history[track_id]["class"].append(class_label)
+			bbox = bbox_history[track_id]["bbox"][-1]
+			
+			if t in online_targets:
+				color = (255, 153, 255) #violet
+			else:
+				color = (255, 255, 0) #cyan
+			
+			frame_copy = cv2.putText(frame_copy, str(track_id) + "_" + str(class_label), (int(bbox[0]), int(bbox[1])), font, fontScale, color, thickness, cv2.LINE_AA)	
+			
 		
 		if args.watchbox:
 			cv2.rectangle(frame_copy, (watchbox[0], watchbox[1]), (watchbox[2], watchbox[3]), (0, 0, 0), 1)
@@ -399,29 +427,36 @@ colors = [(0, 0, 255),(0, 0, 0),(255, 255, 255),(0, 255, 0),(255, 0, 0),(0, 255,
 
 color_idx = 0
 
+"""
 tracks_processed = []
 
-for t_idx,track in enumerate([*online_targets,*lost_tracks,*removed_tracks]):
-	class_detected = np.bincount(track.detected_class).argmax()
+
+#for t_idx,track in enumerate([*online_targets,*lost_tracks,*removed_tracks]):
+	#class_detected = np.bincount(track.detected_class).argmax()
 	#if str(class_detected) in labels:
 	if track.track_id in bbox_history.keys() and track.track_id not in tracks_processed:
 	
 		tracks_processed.append(track.track_id)
+"""
 		
-		for b_idx in range(len(bbox_history[track.track_id]["frame"])):
-			yolo_box = pbx.convert_bbox(tuple(bbox_history[track.track_id]["bbox"][b_idx]), from_type="voc", to_type="yolo", image_size=(pixel_width,pixel_height))
-			
-			dict_key = bbox_history[track.track_id]["frame"][b_idx]
-			if dict_key not in lines_dict:
-				lines_dict[dict_key] = []
-				
-			lines_dict[dict_key].append("%d %f %f %f %f %d\n" % (class_detected, *yolo_box, track.track_id))
+for track_id in bbox_history.keys(): #For each track save the bbox and classifier results fore each frame in a file
+	
+	for b_idx in range(len(bbox_history[track_id]["frame"])):
+		yolo_box = pbx.convert_bbox(tuple(bbox_history[track_id]["bbox"][b_idx]), from_type="voc", to_type="yolo", image_size=(pixel_width,pixel_height))
+		
+		dict_key = bbox_history[track_id]["frame"][b_idx]
+		if dict_key not in lines_dict:
+			lines_dict[dict_key] = []
+		try:
+			lines_dict[dict_key].append("%s %f %f %f %f %d\n" % (bbox_history[track_id]["class"][b_idx], *yolo_box, track_id))
+		except:
+			pdb.set_trace()
 
-			#cv2.rectangle(frame_copy, (int(bbox_history[track.track_id]["bbox"][b_idx][0]), int(bbox_history[track.track_id]["bbox"][b_idx][1])), (int(bbox_history[track.track_id]["bbox"][b_idx][2]), int(bbox_history[track.track_id]["bbox"][b_idx][3])), colors[color_idx], 1)
-		
-		#frame_copy = cv2.putText(frame_copy, str(track.track_id) + "_" + str(class_detected), (int(bbox_history[track.track_id]["bbox"][b_idx][0]), int(bbox_history[track.track_id]["bbox"][b_idx][1])), font, fontScale, colors[color_idx], thickness, cv2.LINE_AA)	
-		
-		color_idx = (color_idx+1) % len(colors)
+		#cv2.rectangle(frame_copy, (int(bbox_history[track.track_id]["bbox"][b_idx][0]), int(bbox_history[track.track_id]["bbox"][b_idx][1])), (int(bbox_history[track.track_id]["bbox"][b_idx][2]), int(bbox_history[track.track_id]["bbox"][b_idx][3])), colors[color_idx], 1)
+	
+	#frame_copy = cv2.putText(frame_copy, str(track.track_id) + "_" + str(class_detected), (int(bbox_history[track.track_id]["bbox"][b_idx][0]), int(bbox_history[track.track_id]["bbox"][b_idx][1])), font, fontScale, colors[color_idx], thickness, cv2.LINE_AA)	
+	
+	color_idx = (color_idx+1) % len(colors)
 		
 		
 
